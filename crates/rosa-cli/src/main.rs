@@ -108,7 +108,7 @@ fn detect_provider() -> Option<(Arc<dyn LlmProvider>, String)> {
     // 2. xAI Grok
     if let Ok(key) = std::env::var("XAI_API_KEY") {
         let model = std::env::var("ROSA_MODEL")
-            .unwrap_or_else(|_| "grok-4-3".to_owned());
+            .unwrap_or_else(|_| "grok-4.3".to_owned());
         let p = rosa_llm::OpenAiProvider::xai(key);
         return Some((Arc::new(p), model));
     }
