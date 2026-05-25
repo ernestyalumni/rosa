@@ -1,0 +1,23 @@
+[package]
+name        = "rosa-cli"
+description = "rosa binary: interactive REPL, streaming render, one-shot ask."
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rosa"
+path = "src/main.rs"
+
+[dependencies]
+rosa-core   = { path = "../rosa-core" }
+rosa-llm    = { path = "../rosa-llm" }
+rosa-tools  = { path = "../rosa-tools" }
+rosa-ros2   = { path = "../rosa-ros2" }
+tokio       = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+tracing     = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# TODO(task-06): add rustyline, crossterm, figment, termimad

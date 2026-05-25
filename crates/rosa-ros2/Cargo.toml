@@ -1,0 +1,29 @@
+[package]
+name        = "rosa-ros2"
+description = "ROS 2 bridge: CLI shell-out tools (5a) and native r2r client (5b, feature-gated)."
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+# Enable native r2r bindings (requires a sourced ROS 2 install at build time)
+ros2-native = ["r2r"]
+
+[dependencies]
+rosa-core   = { path = "../rosa-core" }
+rosa-tools  = { path = "../rosa-tools" }
+async-trait = { workspace = true }
+tokio       = { workspace = true }
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+schemars    = { workspace = true }
+thiserror   = { workspace = true }
+tracing     = { workspace = true }
+regex       = "1"
+# r2r only pulled in with the ros2-native feature
+r2r = { version = "0.9", optional = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
