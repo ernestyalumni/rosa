@@ -6,3 +6,7 @@ dist/
 __pycache__/
 docs
 .DS_Store
+
+# Rust build artifacts
+/target/
+Cargo.lock
