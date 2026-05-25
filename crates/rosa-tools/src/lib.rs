@@ -1,27 +1,43 @@
-//! Tool trait, ToolRegistry, and built-in tools.
+//! Tool trait, `ToolRegistry`, and provider-agnostic built-in tools.
 //!
-//! Task 04 implements this fully. This stub compiles immediately.
+//! ## Architecture
+//!
+//! ```text
+//! rosa_core::agent::ToolDispatcher   (trait, defined in rosa-core)
+//!         ↑
+//!  ToolRegistry  ─── holds ──→  Vec<Box<dyn Tool>>
+//!                                       ↑
+//!                            AddTool / LogMessageTool / SystemInfoTool
+//!                            (builtin) + user-defined tools
+//! ```
+//!
+//! ## Quick start
+//!
+//! ```no_run
+//! use rosa_tools::{ToolRegistry, builtin::{AddTool, LogMessageTool, SystemInfoTool}};
+//! use rosa_core::agent::ToolDispatcher;
+//!
+//! #[tokio::main]
+//! async fn main() {
+//!     let registry = ToolRegistry::new()
+//!         .register(AddTool)
+//!         .register(LogMessageTool)
+//!         .register(SystemInfoTool);
+//!
+//!     let result = registry
+//!         .dispatch("add", serde_json::json!({"a": 1.0, "b": 2.0}))
+//!         .await
+//!         .unwrap();
+//!     assert_eq!(result, serde_json::json!(3.0));
+//! }
+//! ```
 
-// TODO(task-04): implement Tool trait, ToolRegistry, builtin tools
+pub mod builtin;
+mod registry;
+pub mod tool;
 
-use rosa_core::{RosaError, ToolSpec};
-use rosa_core::agent::ToolDispatcher;
-use async_trait::async_trait;
+#[cfg(test)]
+mod tests;
 
-/// Placeholder registry; task 04 replaces this with the full implementation.
-pub struct ToolRegistry;
-
-#[async_trait]
-impl ToolDispatcher for ToolRegistry {
-    fn tool_specs(&self) -> Vec<ToolSpec> {
-        vec![]
-    }
-
-    async fn dispatch(
-        &self,
-        name: &str,
-        _args: serde_json::Value,
-    ) -> rosa_core::Result<serde_json::Value> {
-        Err(RosaError::ToolNotFound { name: name.to_owned() })
-    }
-}
+pub use registry::ToolRegistry;
+pub use tool::Tool;
