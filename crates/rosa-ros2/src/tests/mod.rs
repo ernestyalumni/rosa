@@ -1,0 +1,206 @@
+//! Unit tests for rosa-ros2.
+//!
+//! Uses `MockRunner` to avoid requiring a live ROS 2 install.
+//! Integration tests that need the real `ros2` CLI are marked `#[ignore]` and
+//! can be run with:
+//!   `cargo test -p rosa-ros2 -- --include-ignored`
+
+use serde_json::json;
+use rosa_core::agent::ToolDispatcher;
+use rosa_tools::Tool;
+
+use crate::{
+    filter::filter_lines,
+    runner::MockRunner,
+    tools::{
+        DoctorTool, ListNodesTool, ListServicesTool, ListTopicsTool,
+        TopicEchoTool,
+    },
+    ros2_registry_default,
+};
+
+// ---------------------------------------------------------------------------
+// filter::filter_lines (tested in filter.rs; extra cross-tool test here)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_blacklist_removes_docker_and_master() {
+    let output = "/rosout\n/master_node\n/turtlesim\n/docker_bridge_topic\n";
+    let blacklist = vec!["master".into(), "docker".into()];
+    let result = filter_lines(output, &blacklist, None);
+    assert_eq!(result, vec!["/rosout", "/turtlesim"]);
+}
+
+// ---------------------------------------------------------------------------
+// ros2_list_nodes (with MockRunner)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_list_nodes_returns_filtered_nodes() {
+    let runner = MockRunner::new("/rosout\n/master_node\n/turtlesim\n/docker_bridge\n");
+    let tool = ListNodesTool::with_runner(runner, vec!["master".into(), "docker".into()]);
+    let result = tool.execute(json!({})).await.unwrap();
+
+    let nodes: Vec<&str> = result["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(nodes.contains(&"/rosout"),    "expected /rosout");
+    assert!(nodes.contains(&"/turtlesim"), "expected /turtlesim");
+    assert!(!nodes.iter().any(|n| n.contains("master")), "master should be filtered");
+    assert!(!nodes.iter().any(|n| n.contains("docker")), "docker should be filtered");
+}
+
+#[tokio::test]
+async fn test_list_nodes_pattern_filter() {
+    let runner = MockRunner::new("/rosout\n/turtlesim\n/my_node\n");
+    let tool = ListNodesTool::with_runner(runner, vec![]);
+    let result = tool.execute(json!({"pattern": "turtle"})).await.unwrap();
+
+    let nodes: Vec<&str> = result["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(nodes, vec!["/turtlesim"]);
+}
+
+// ---------------------------------------------------------------------------
+// ros2_list_topics (with MockRunner)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_list_topics_parses_name_and_type() {
+    let output = "/clock [std_msgs/msg/Time]\n\
+                  /parameter_events [rcl_interfaces/msg/ParameterEvent]\n\
+                  /docker_topic [std_msgs/msg/String]\n";
+    let runner = MockRunner::new(output);
+    let tool = ListTopicsTool::with_runner(runner, vec!["docker".into()]);
+    let result = tool.execute(json!({})).await.unwrap();
+
+    let topics = result["topics"].as_array().unwrap();
+    assert_eq!(topics.len(), 2);
+    assert_eq!(topics[0]["name"], json!("/clock"));
+    assert_eq!(topics[0]["type"], json!("std_msgs/msg/Time"));
+    assert_eq!(topics[1]["name"], json!("/parameter_events"));
+}
+
+// ---------------------------------------------------------------------------
+// ros2_list_services (with MockRunner)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_list_services_parses_correctly() {
+    let output = "/turtlesim/spawn [turtlesim/srv/Spawn]\n";
+    let runner = MockRunner::new(output);
+    let tool = ListServicesTool::with_runner(runner, vec![]);
+    let result = tool.execute(json!({})).await.unwrap();
+
+    let services = result["services"].as_array().unwrap();
+    assert_eq!(services.len(), 1);
+    assert_eq!(services[0]["name"], json!("/turtlesim/spawn"));
+    assert_eq!(services[0]["type"], json!("turtlesim/srv/Spawn"));
+}
+
+// ---------------------------------------------------------------------------
+// ros2_topic_echo (with MockRunner)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_topic_echo_returns_message() {
+    let yaml = "x: 5.54\ny: 5.54\ntheta: 0.0\n";
+    let runner = MockRunner::new(yaml);
+    let tool = TopicEchoTool::with_runner(runner, vec![]);
+    let result = tool
+        .execute(json!({"topic": "/turtle1/pose", "msg_type": "turtlesim/msg/Pose"}))
+        .await
+        .unwrap();
+    assert!(result["message"].as_str().unwrap().contains("x: 5.54"));
+}
+
+// ---------------------------------------------------------------------------
+// ros2_doctor (with MockRunner)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_doctor_returns_report() {
+    let report = "All 5 checks passed\n";
+    let runner = MockRunner::new(report);
+    let tool = DoctorTool::with_runner(runner, vec![]);
+    let result = tool.execute(json!({})).await.unwrap();
+    assert!(result["report"].as_str().unwrap().contains("All 5 checks passed"));
+}
+
+// ---------------------------------------------------------------------------
+// Registry registration
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_ros2_registry_registers_all_tools() {
+    let registry = ros2_registry_default();
+    assert_eq!(registry.len(), 9);
+    let specs = registry.tool_specs();
+    let names: Vec<&str> = specs.iter().map(|s| s.name.as_str()).collect();
+    assert!(names.contains(&"ros2_list_nodes"));
+    assert!(names.contains(&"ros2_list_topics"));
+    assert!(names.contains(&"ros2_list_services"));
+    assert!(names.contains(&"ros2_list_params"));
+    assert!(names.contains(&"ros2_topic_echo"));
+    assert!(names.contains(&"ros2_topic_info"));
+    assert!(names.contains(&"ros2_node_info"));
+    assert!(names.contains(&"ros2_param_get"));
+    assert!(names.contains(&"ros2_doctor"));
+}
+
+#[test]
+fn test_registry_as_openai_tools() {
+    let registry = ros2_registry_default();
+    let tools = registry.as_openai_tools();
+    assert_eq!(tools.len(), 9);
+    for t in &tools {
+        assert_eq!(t["type"], json!("function"));
+        assert!(t["function"]["name"].is_string());
+        assert!(t["function"]["description"].is_string());
+        assert!(t["function"]["parameters"]["type"] == json!("object") ||
+                t["function"]["parameters"].is_object());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Integration tests (require live ROS 2 container — run with --include-ignored)
+// ---------------------------------------------------------------------------
+
+/// Requires the `Monoclaw/Deployments/ROS` docker-compose stack to be running.
+/// Run: `cargo test -p rosa-ros2 test_integration -- --include-ignored`
+#[tokio::test]
+#[ignore = "requires live ROS 2 (docker compose up in Monoclaw/Deployments/ROS)"]
+async fn test_integration_list_topics_finds_parameter_events() {
+    use crate::tools::ListTopicsTool;
+    let tool = ListTopicsTool::new(vec![]);
+    let result = tool.execute(json!({})).await.unwrap();
+    let topics = result["topics"].as_array().unwrap();
+    let names: Vec<&str> = topics
+        .iter()
+        .map(|t| t["name"].as_str().unwrap_or(""))
+        .collect();
+    assert!(
+        names.contains(&"/parameter_events"),
+        "expected /parameter_events in topic list, got: {names:?}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires live ROS 2 (docker compose up in Monoclaw/Deployments/ROS)"]
+async fn test_integration_doctor_passes() {
+    use crate::tools::DoctorTool;
+    let tool = DoctorTool::new(vec![]);
+    let result = tool.execute(json!({})).await.unwrap();
+    let report = result["report"].as_str().unwrap();
+    assert!(
+        report.contains("passed") || report.contains("ok"),
+        "expected doctor to pass, got:\n{report}"
+    );
+}
