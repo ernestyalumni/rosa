@@ -41,15 +41,32 @@ use rosa_ros2::ros2_registry_default;
 // Turtle-specific tools
 // ---------------------------------------------------------------------------
 
-/// Run a `ros2` command, optionally via `docker exec ROS_CONTAINER`.
+/// POSIX single-quote a string so it survives `bash -ic "…"`.
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// Run a `ros2` command, optionally via `docker exec ROS_CONTAINER bash -ic`.
+///
+/// **Why `bash -ic`?** `docker exec container ros2 …` tries to exec the `ros2`
+/// binary directly. But `ros2` lives under `/opt/ros/humble/bin` which is only
+/// added to PATH when bash sources `.bashrc` (which sources `setup.bash`). Without
+/// the shell wrapper ros2 is not found and the command fails with no stderr output.
+/// Routing through `bash -ic` mirrors what `ShellRunner` does for all other tools.
 async fn ros2_exec(args: &[&str], timeout_secs: u64) -> std::result::Result<String, String> {
     let ros_container = std::env::var("ROS_CONTAINER").ok();
 
+    let owned_cmd: String;
     let (program, full_args): (&str, Vec<&str>) = if let Some(ref c) = ros_container {
-        let mut v: Vec<&str> = vec!["exec", c.as_str(), "ros2"];
-        v.extend_from_slice(args);
-        ("docker", v)
+        // Shell-quote every arg so YAML bodies with spaces/braces survive bash.
+        owned_cmd = format!(
+            "ros2 {}",
+            args.iter().map(|a| shell_quote(a)).collect::<Vec<_>>().join(" ")
+        );
+        ("docker", vec!["exec", c.as_str(), "bash", "-ic", &owned_cmd])
     } else {
+        owned_cmd = String::new();
+        let _ = &owned_cmd;
         ("ros2", args.to_vec())
     };
 
@@ -253,8 +270,11 @@ impl Tool for TurtleSetPen {
     async fn execute(&self, args: Value) -> Result<Value> {
         let a: SetPenArgs = serde_json::from_value(args)?;
         let svc    = format!("/{}/set_pen", a.name);
+        // "off" must be double-quoted: bare `off` is a YAML 1.1 boolean (= False),
+        // causing PyYAML inside the container to parse {off: 0} as {False: 0} →
+        // ros2 crashes with "attribute name must be string".
         let params = format!(
-            "{{r: {}, g: {}, b: {}, width: {}, off: {}}}",
+            "{{r: {}, g: {}, b: {}, width: {}, \"off\": {}}}",
             a.r, a.g, a.b, a.width, a.off
         );
         ros2_exec(&["service", "call", &svc, "turtlesim/srv/SetPen", &params], 5)
@@ -400,7 +420,9 @@ impl Tool for TurtleSpawn {
         let params = if a.name.is_empty() {
             format!("{{x: {:.4}, y: {:.4}, theta: {:.4}}}", a.x, a.y, a.theta)
         } else {
-            format!("{{x: {:.4}, y: {:.4}, theta: {:.4}, name: '{}'}}", a.x, a.y, a.theta, a.name)
+            // Double-quote the name so it's unambiguously a YAML string and
+            // shell_quote doesn't need to escape inner single quotes.
+            format!("{{x: {:.4}, y: {:.4}, theta: {:.4}, name: \"{}\"}}", a.x, a.y, a.theta, a.name)
         };
         let raw = ros2_exec(
             &["service", "call", "/spawn", "turtlesim/srv/Spawn", &params],
@@ -432,7 +454,7 @@ impl Tool for TurtleKill {
 
     async fn execute(&self, args: Value) -> Result<Value> {
         let a: KillArgs = serde_json::from_value(args)?;
-        let params = format!("{{name: '{}'}}", a.name);
+        let params = format!("{{name: \"{}\"}}", a.name);
         ros2_exec(
             &["service", "call", "/kill", "turtlesim/srv/Kill", &params],
             5,
