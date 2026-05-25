@@ -305,9 +305,18 @@ async fn test_integration_doctor_passes() {
     let tool = DoctorTool::new(vec![]);
     let result = tool.execute(json!({})).await.unwrap();
     let report = result["report"].as_str().unwrap();
-    // `ros2 doctor --report` uses "OK" for status; `ros2 doctor` says "All N checks passed"
+    // `ros2 doctor --report` emits a structured diagnostic dump with named sections
+    // (NETWORK CONFIGURATION, PLATFORM INFORMATION, ROS 2 INFORMATION, etc.).
+    // It does NOT print "ok" or "passed" — that's what bare `ros2 doctor` (no flag) says.
+    // Assert the report is non-empty and contains the ROS 2 section header.
+    assert!(!report.is_empty(), "doctor report was empty");
     assert!(
-        report.to_lowercase().contains("ok") || report.contains("passed"),
-        "expected doctor to pass, got:\n{report}"
+        report.contains("ROS 2 INFORMATION") || report.contains("PLATFORM INFORMATION"),
+        "expected structured --report output, got:\n{report}"
+    );
+    // Confirm the RMW middleware matches our CycloneDDS config.
+    assert!(
+        report.contains("rmw_cyclonedds_cpp"),
+        "expected CycloneDDS middleware, got:\n{report}"
     );
 }
