@@ -314,6 +314,338 @@ impl Tool for TurtleWithinBounds {
     }
 }
 
+// ── turtle_reset ──────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct ResetArgs {}
+
+struct TurtleReset;
+
+#[async_trait]
+impl Tool for TurtleReset {
+    fn name(&self) -> &str { "turtle_reset" }
+    fn description(&self) -> &str {
+        "Reset TurtleSim: removes all extra turtles, clears drawings, and returns \
+         turtle1 to the centre. Calls the /reset service."
+    }
+    fn schema(&self) -> RootSchema { schema_for!(ResetArgs) }
+
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let _: ResetArgs = serde_json::from_value(args)?;
+        ros2_exec(&["service", "call", "/reset", "std_srvs/srv/Empty", "{}"], 5)
+            .await
+            .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
+        Ok(json!({ "reset": true }))
+    }
+}
+
+// ── turtle_stop ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct StopArgs {
+    #[serde(default = "default_turtle")]
+    pub name: String,
+}
+
+struct TurtleStop;
+
+#[async_trait]
+impl Tool for TurtleStop {
+    fn name(&self) -> &str { "turtle_stop" }
+    fn description(&self) -> &str {
+        "Send a zero-velocity command to immediately stop a turtle's motion."
+    }
+    fn schema(&self) -> RootSchema { schema_for!(StopArgs) }
+
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: StopArgs = serde_json::from_value(args)?;
+        let topic = format!("/{}/cmd_vel", a.name);
+        let stop  = "{linear: {x: 0.0}, angular: {z: 0.0}}";
+        ros2_exec(
+            &["topic", "pub", "--times", "1", &topic, "geometry_msgs/msg/Twist", stop],
+            5,
+        )
+        .await
+        .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
+        Ok(json!({ "stopped": true, "turtle": a.name }))
+    }
+}
+
+// ── turtle_spawn ──────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct SpawnArgs {
+    pub x:     f64,
+    pub y:     f64,
+    #[serde(default)]
+    pub theta: f64,
+    /// Name for the new turtle (e.g. `turtle2`). Omit to let TurtleSim choose.
+    #[serde(default)]
+    pub name:  String,
+}
+
+struct TurtleSpawn;
+
+#[async_trait]
+impl Tool for TurtleSpawn {
+    fn name(&self) -> &str { "turtle_spawn" }
+    fn description(&self) -> &str {
+        "Spawn a new turtle at (x, y, theta). Optionally give it a name. \
+         Returns the name assigned by TurtleSim."
+    }
+    fn schema(&self) -> RootSchema { schema_for!(SpawnArgs) }
+
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: SpawnArgs = serde_json::from_value(args)?;
+        let params = if a.name.is_empty() {
+            format!("{{x: {:.4}, y: {:.4}, theta: {:.4}}}", a.x, a.y, a.theta)
+        } else {
+            format!("{{x: {:.4}, y: {:.4}, theta: {:.4}, name: '{}'}}", a.x, a.y, a.theta, a.name)
+        };
+        let raw = ros2_exec(
+            &["service", "call", "/spawn", "turtlesim/srv/Spawn", &params],
+            10,
+        )
+        .await
+        .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
+        Ok(json!({ "spawned": true, "response": raw }))
+    }
+}
+
+// ── turtle_kill ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct KillArgs {
+    /// Name of the turtle to kill (e.g. `turtle2`).
+    pub name: String,
+}
+
+struct TurtleKill;
+
+#[async_trait]
+impl Tool for TurtleKill {
+    fn name(&self) -> &str { "turtle_kill" }
+    fn description(&self) -> &str {
+        "Remove a turtle from TurtleSim by name. Cannot kill the last remaining turtle."
+    }
+    fn schema(&self) -> RootSchema { schema_for!(KillArgs) }
+
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: KillArgs = serde_json::from_value(args)?;
+        let params = format!("{{name: '{}'}}", a.name);
+        ros2_exec(
+            &["service", "call", "/kill", "turtlesim/srv/Kill", &params],
+            5,
+        )
+        .await
+        .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
+        Ok(json!({ "killed": a.name }))
+    }
+}
+
+// ── turtle_teleport_relative ──────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct TeleportRelativeArgs {
+    #[serde(default = "default_turtle")]
+    pub name:   String,
+    /// Linear distance to move forward (turtle's local +x axis).
+    pub linear: f64,
+    /// Angle to rotate (radians, positive = counterclockwise).
+    pub angular: f64,
+}
+
+struct TurtleTeleportRelative;
+
+#[async_trait]
+impl Tool for TurtleTeleportRelative {
+    fn name(&self) -> &str { "turtle_teleport_relative" }
+    fn description(&self) -> &str {
+        "Teleport a turtle by a relative offset: rotate by `angular` radians then \
+         move `linear` units forward in the turtle's local frame. No drawing occurs."
+    }
+    fn schema(&self) -> RootSchema { schema_for!(TeleportRelativeArgs) }
+
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: TeleportRelativeArgs = serde_json::from_value(args)?;
+        let svc    = format!("/{}/teleport_relative", a.name);
+        let params = format!("{{linear: {:.4}, angular: {:.4}}}", a.linear, a.angular);
+        ros2_exec(
+            &["service", "call", &svc, "turtlesim/srv/TeleportRelative", &params],
+            5,
+        )
+        .await
+        .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
+        Ok(json!({ "teleported_relative": true, "linear": a.linear, "angular": a.angular }))
+    }
+}
+
+// ── turtle_draw_line_to ───────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct DrawLineToArgs {
+    #[serde(default = "default_turtle")]
+    pub name: String,
+    /// Target x coordinate in TurtleSim canvas space.
+    pub target_x: f64,
+    /// Target y coordinate in TurtleSim canvas space.
+    pub target_y: f64,
+    /// Turtle speed (units/s, default 2.0).
+    #[serde(default = "default_speed")]
+    pub speed: f64,
+}
+fn default_speed() -> f64 { 2.0 }
+
+struct TurtleDrawLineTo;
+
+#[async_trait]
+impl Tool for TurtleDrawLineTo {
+    fn name(&self) -> &str { "turtle_draw_line_to" }
+    fn description(&self) -> &str {
+        "Draw a straight line from the turtle's current pose to (target_x, target_y). \
+         Reads the current pose, rotates to face the target, then drives forward. \
+         The pen must be down before calling this."
+    }
+    fn schema(&self) -> RootSchema { schema_for!(DrawLineToArgs) }
+
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: DrawLineToArgs = serde_json::from_value(args)?;
+        if a.speed <= 0.0 {
+            return Err(RosaError::ToolExecution {
+                name: self.name().into(),
+                message: "speed must be > 0".into(),
+            });
+        }
+
+        // 1. Read current pose
+        let topic = format!("/{}/pose", a.name);
+        let raw = ros2_exec(
+            &["topic", "echo", "--once", &topic, "turtlesim/msg/Pose"],
+            10,
+        )
+        .await
+        .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
+
+        let (mut cx, mut cy, mut ctheta) = (0.0f64, 0.0f64, 0.0f64);
+        for line in raw.lines() {
+            if let Some(v) = line.trim().strip_prefix("x:") { cx = v.trim().parse().unwrap_or(0.0); }
+            else if let Some(v) = line.trim().strip_prefix("y:") { cy = v.trim().parse().unwrap_or(0.0); }
+            else if let Some(v) = line.trim().strip_prefix("theta:") { ctheta = v.trim().parse().unwrap_or(0.0); }
+        }
+
+        // 2. Compute heading and distance
+        let dx = a.target_x - cx;
+        let dy = a.target_y - cy;
+        let distance = (dx * dx + dy * dy).sqrt();
+        if distance < 0.01 {
+            return Ok(json!({ "drawn": true, "distance": 0.0, "note": "already at target" }));
+        }
+        let target_theta = dy.atan2(dx);
+        // Minimal angle difference (wrap to [-π, π])
+        let mut dtheta = target_theta - ctheta;
+        while dtheta > std::f64::consts::PI  { dtheta -= 2.0 * std::f64::consts::PI; }
+        while dtheta < -std::f64::consts::PI { dtheta += 2.0 * std::f64::consts::PI; }
+
+        // 3. Rotate to face target (angular_z = 1.5 rad/s)
+        let rot_speed = 1.5_f64;
+        let rot_dur = dtheta.abs() / rot_speed;
+        if rot_dur > 0.05 {
+            let rot_sign = if dtheta >= 0.0 { 1.0 } else { -1.0 };
+            let cmd_vel_topic = format!("/{}/cmd_vel", a.name);
+            let times = (rot_dur * 10.0).ceil() as u64;
+            let twist = format!("{{linear: {{x: 0.0}}, angular: {{z: {:.4}}}}}", rot_sign * rot_speed);
+            ros2_exec(
+                &["topic", "pub", "--rate", "10", "--times", &times.to_string(),
+                  &cmd_vel_topic, "geometry_msgs/msg/Twist", &twist],
+                (rot_dur as u64) + 5,
+            )
+            .await
+            .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
+        }
+
+        // 4. Drive forward for distance / speed seconds
+        let drive_dur = distance / a.speed;
+        let cmd_vel_topic = format!("/{}/cmd_vel", a.name);
+        let times = (drive_dur * 10.0).ceil() as u64;
+        let twist = format!("{{linear: {{x: {:.4}}}, angular: {{z: 0.0}}}}", a.speed);
+        ros2_exec(
+            &["topic", "pub", "--rate", "10", "--times", &times.to_string(),
+              &cmd_vel_topic, "geometry_msgs/msg/Twist", &twist],
+            (drive_dur as u64) + 10,
+        )
+        .await
+        .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
+
+        Ok(json!({
+            "drawn": true,
+            "from": { "x": cx, "y": cy },
+            "to":   { "x": a.target_x, "y": a.target_y },
+            "distance": distance,
+        }))
+    }
+}
+
+// ── turtle_draw_circle ────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct DrawCircleArgs {
+    #[serde(default = "default_turtle")]
+    pub name: String,
+    /// Radius of the circle (canvas units, max 5.0).
+    pub radius: f64,
+    /// Speed (units/s, default 2.0).
+    #[serde(default = "default_speed")]
+    pub speed: f64,
+}
+
+struct TurtleDrawCircle;
+
+#[async_trait]
+impl Tool for TurtleDrawCircle {
+    fn name(&self) -> &str { "turtle_draw_circle" }
+    fn description(&self) -> &str {
+        "Draw a circle of the given radius at the turtle's current position. \
+         Uses a continuous Twist with matching linear and angular velocities. \
+         The pen must be down before calling."
+    }
+    fn schema(&self) -> RootSchema { schema_for!(DrawCircleArgs) }
+
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: DrawCircleArgs = serde_json::from_value(args)?;
+        if a.radius <= 0.0 || a.radius > 5.5 {
+            return Err(RosaError::ToolExecution {
+                name: self.name().into(),
+                message: "radius must be in (0, 5.5]".into(),
+            });
+        }
+        // circumference / speed = time for one full circle
+        let circumference = 2.0 * std::f64::consts::PI * a.radius;
+        let duration = circumference / a.speed;
+        let angular_z = a.speed / a.radius; // ω = v / r
+
+        let topic  = format!("/{}/cmd_vel", a.name);
+        let times  = (duration * 10.0).ceil() as u64;
+        let twist  = format!(
+            "{{linear: {{x: {:.4}}}, angular: {{z: {:.4}}}}}",
+            a.speed, angular_z
+        );
+        ros2_exec(
+            &["topic", "pub", "--rate", "10", "--times", &times.to_string(),
+              &topic, "geometry_msgs/msg/Twist", &twist],
+            (duration as u64) + 10,
+        )
+        .await
+        .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
+
+        Ok(json!({
+            "drawn": true,
+            "radius": a.radius,
+            "circumference": circumference,
+            "duration_s": duration,
+        }))
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Build the full turtle registry
 // ---------------------------------------------------------------------------
@@ -326,6 +658,13 @@ fn turtle_registry() -> ToolRegistry {
         .register(TurtleSetPen)
         .register(TurtleClear)
         .register(TurtleWithinBounds)
+        .register(TurtleReset)
+        .register(TurtleStop)
+        .register(TurtleSpawn)
+        .register(TurtleKill)
+        .register(TurtleTeleportRelative)
+        .register(TurtleDrawLineTo)
+        .register(TurtleDrawCircle)
 }
 
 // ---------------------------------------------------------------------------
@@ -364,15 +703,16 @@ async fn main() {
     // Print banner
     println!("┌─────────────────────────────────────────────────────┐");
     println!("│  rosa turtle demo  •  model: {model:<23}│");
-    println!("│  type /quit to exit  •  Ctrl-C cancels a turn       │");
+    println!("│  /clear  /quit  •  Ctrl-C cancels a turn            │");
     println!("└─────────────────────────────────────────────────────┘");
     if let Ok(c) = std::env::var("ROS_CONTAINER") {
         println!("  ros2 → docker exec {c}");
     }
     println!();
-    println!("  Try: 'Draw a 5-point star using the turtle.'");
-    println!("       'Move turtle1 forward 3 units and back.'");
-    println!("       'What topics are available?'");
+    println!("  Try: 'Draw a 5-point star.'");
+    println!("       'Spawn a second turtle at (3, 8) and draw a circle of radius 1.5.'");
+    println!("       'Draw a triangle with side length 3.'");
+    println!("       'Reset the sim and draw a red square.'");
     println!();
 
     // REPL
@@ -389,7 +729,15 @@ async fn main() {
 
         let query = input.trim();
         if query.is_empty() { continue; }
-        if matches!(query, "/quit" | "/exit") { println!("Bye!"); break; }
+        match query {
+            "/quit" | "/exit" => { println!("Bye!"); break; }
+            "/clear" => {
+                agent.clear_history().await;
+                println!("  conversation history cleared.");
+                continue;
+            }
+            _ => {}
+        }
 
         run_turn(&agent, query).await;
         println!();
@@ -463,23 +811,45 @@ You are rosa, a robot operator controlling a TurtleSim in ROS 2.
 - theta = 0 → facing right (+x); theta = π/2 → facing up (+y)
 - `linear_x > 0` → move forward; `angular_z > 0` → turn counterclockwise
 
-## Drawing a 5-point Star
-A 5-point star: forward, turn 144° (2.5133 rad), repeat 5 times.
-- Use `turtle_teleport_absolute` to position, `turtle_set_pen` to choose color.
-- Each side: ~2.5 units at linear_x = 1.5 units/s → duration_s = 1.67s
-- Each turn: angular_z = 2.0 rad/s, turn 144° = 2.5133 rad → duration_s = 1.26s
-- After drawing, send a zero-velocity to stop.
+## Available Tools
+| Tool                       | Purpose                                           |
+|----------------------------|---------------------------------------------------|
+| `turtle_publish_twist`     | Move/rotate for N seconds                        |
+| `turtle_get_pose`          | Read current (x, y, theta)                       |
+| `turtle_teleport_absolute` | Jump to (x, y, theta) without drawing            |
+| `turtle_teleport_relative` | Relative rotate + forward jump without drawing   |
+| `turtle_set_pen`           | Set pen colour (r,g,b), width, on/off            |
+| `turtle_clear`             | Clear drawings (keeps turtles)                   |
+| `turtle_reset`             | Full reset: remove extra turtles, clear canvas   |
+| `turtle_stop`              | Send zero-velocity to stop immediately           |
+| `turtle_spawn`             | Spawn a new turtle at (x, y, theta)              |
+| `turtle_kill`              | Remove a turtle by name                          |
+| `turtle_draw_line_to`      | Draw line from current pose to (target_x, target_y)|
+| `turtle_draw_circle`       | Draw circle of given radius at current position  |
+| `turtle_within_bounds`     | Check if (x, y) is inside the canvas            |
 
-## Tool Usage Order
-1. `turtle_clear` — reset canvas
-2. `turtle_teleport_absolute` — move to start position (pen-up: use set_pen off=1 first)
-3. `turtle_set_pen` — choose pen color (off=0 to resume drawing)
-4. Loop: `turtle_publish_twist` (forward) → `turtle_publish_twist` (turn)
-5. `turtle_get_pose` — verify position if needed
-6. `turtle_within_bounds` — sanity check before large moves
+Plus all ROS 2 inspection tools: `ros2_list_nodes`, `ros2_list_topics`, `ros2_service_call`, etc.
 
-## Important
-- Always stop after each movement (send angular_z=0, linear_x=0 or rely on the tool's auto-stop).
-- For precise shapes, calculate durations from speed × time = distance/angle.
-- A complete 5-point star visits all 5 points in order by turning 144° between legs.
+## Drawing Strategy
+
+**Straight lines:** use `turtle_draw_line_to` — it auto-rotates and drives.
+
+**Circles:** use `turtle_draw_circle` — it computes angular velocity from v/r.
+
+**Polygons (star, square, triangle):**
+1. `turtle_teleport_absolute` to start corner (pen up first with `turtle_set_pen off=1`)
+2. `turtle_set_pen off=0` to put pen down, choose colour
+3. Loop N sides: `turtle_publish_twist` (forward) → `turtle_publish_twist` (turn)
+   - Turn angle for N-gon: 360°/N exterior angle
+   - 5-point star turn: 144° = 2.5133 rad
+4. `turtle_stop` to ensure motion has ceased
+
+**Multi-turtle:** spawn with `turtle_spawn`, address each by `name`.
+
+## Important Rules
+- Never compute trig yourself — use `atan2`, `sin`, `cos`, `degrees_to_radians`, etc.
+- Always verify bounds with `turtle_within_bounds` before large moves.
+- After `turtle_publish_twist`, the tool auto-sends a stop — no need to call `turtle_stop` again
+  unless you need an explicit halt mid-sequence.
+- For precise shapes: time = distance / speed or time = angle / angular_rate.
 ";

@@ -2,17 +2,19 @@
 //!
 //! ## Tools registered by [`ros2_registry`]
 //!
-//! | Tool name             | Wraps                          |
-//! |-----------------------|--------------------------------|
-//! | `ros2_list_nodes`     | `ros2 node list`               |
-//! | `ros2_list_topics`    | `ros2 topic list -t`           |
-//! | `ros2_list_services`  | `ros2 service list -t`         |
-//! | `ros2_list_params`    | `ros2 param list [node]`       |
-//! | `ros2_topic_echo`     | `ros2 topic echo --once`       |
-//! | `ros2_topic_info`     | `ros2 topic info -v`           |
-//! | `ros2_node_info`      | `ros2 node info`               |
-//! | `ros2_param_get`      | `ros2 param get`               |
-//! | `ros2_doctor`         | `ros2 doctor --report`         |
+//! | Tool name              | Wraps                          |
+//! |------------------------|--------------------------------|
+//! | `ros2_list_nodes`      | `ros2 node list`               |
+//! | `ros2_list_topics`     | `ros2 topic list -t`           |
+//! | `ros2_list_services`   | `ros2 service list -t`         |
+//! | `ros2_list_params`     | `ros2 param list [node]`       |
+//! | `ros2_topic_echo`      | `ros2 topic echo --once`       |
+//! | `ros2_topic_info`      | `ros2 topic info -v`           |
+//! | `ros2_node_info`       | `ros2 node info`               |
+//! | `ros2_param_get`       | `ros2 param get`               |
+//! | `ros2_param_set`       | `ros2 param set`               |
+//! | `ros2_service_call`    | `ros2 service call`            |
+//! | `ros2_doctor`          | `ros2 doctor --report`         |
 //!
 //! Each tool has a 5-second timeout and applies a blacklist filter to stdout.
 //!
@@ -33,7 +35,8 @@ use rosa_tools::ToolRegistry;
 
 pub use tools::{
     DoctorTool, ListNodesTool, ListParamsTool, ListServicesTool,
-    ListTopicsTool, NodeInfoTool, ParamGetTool, TopicEchoTool, TopicInfoTool,
+    ListTopicsTool, NodeInfoTool, ParamGetTool, ParamSetTool,
+    ServiceCallTool, TopicEchoTool, TopicInfoTool,
 };
 
 /// Default blacklist — matches upstream rosa's `["master", "docker"]` convention.
@@ -58,6 +61,8 @@ pub fn ros2_registry(blacklist: Vec<String>) -> ToolRegistry {
         .register(TopicInfoTool::new(blacklist.clone()))
         .register(NodeInfoTool::new(blacklist.clone()))
         .register(ParamGetTool::new(blacklist.clone()))
+        .register(ParamSetTool::new(blacklist.clone()))
+        .register(ServiceCallTool::new(blacklist.clone()))
         .register(DoctorTool::new(blacklist))
 }
 

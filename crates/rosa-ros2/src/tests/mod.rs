@@ -14,7 +14,7 @@ use crate::{
     runner::MockRunner,
     tools::{
         DoctorTool, ListNodesTool, ListServicesTool, ListTopicsTool,
-        TopicEchoTool,
+        ParamSetTool, ServiceCallTool, TopicEchoTool,
     },
     ros2_registry_default,
 };
@@ -122,6 +122,63 @@ async fn test_topic_echo_returns_message() {
 }
 
 // ---------------------------------------------------------------------------
+// ros2_param_set (with MockRunner)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_param_set_returns_result() {
+    let runner = MockRunner::new("Set parameter successful");
+    let tool = ParamSetTool::with_runner(runner, vec![]);
+    let result = tool
+        .execute(serde_json::json!({
+            "node": "/turtlesim",
+            "name": "background_r",
+            "value": "255"
+        }))
+        .await
+        .unwrap();
+    assert_eq!(result["node"], serde_json::json!("/turtlesim"));
+    assert_eq!(result["name"], serde_json::json!("background_r"));
+    assert_eq!(result["value"], serde_json::json!("255"));
+    assert!(result["result"].as_str().unwrap().contains("successful"));
+}
+
+// ---------------------------------------------------------------------------
+// ros2_service_call (with MockRunner)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_service_call_returns_response() {
+    let runner = MockRunner::new("response:\n  name: turtle2");
+    let tool = ServiceCallTool::with_runner(runner, vec![]);
+    let result = tool
+        .execute(serde_json::json!({
+            "service": "/turtlesim/spawn",
+            "srv_type": "turtlesim/srv/Spawn",
+            "request": "{x: 2.0, y: 2.0, theta: 0.0, name: 'turtle2'}"
+        }))
+        .await
+        .unwrap();
+    assert_eq!(result["service"], serde_json::json!("/turtlesim/spawn"));
+    assert!(result["response"].as_str().unwrap().contains("turtle2"));
+}
+
+#[tokio::test]
+async fn test_service_call_defaults_empty_request() {
+    let runner = MockRunner::new("response: {}");
+    let tool = ServiceCallTool::with_runner(runner, vec![]);
+    // No "request" field — should default to "{}" without error
+    let result = tool
+        .execute(serde_json::json!({
+            "service": "/turtlesim/clear",
+            "srv_type": "std_srvs/srv/Empty"
+        }))
+        .await
+        .unwrap();
+    assert_eq!(result["service"], serde_json::json!("/turtlesim/clear"));
+}
+
+// ---------------------------------------------------------------------------
 // ros2_doctor (with MockRunner)
 // ---------------------------------------------------------------------------
 
@@ -141,7 +198,7 @@ async fn test_doctor_returns_report() {
 #[test]
 fn test_ros2_registry_registers_all_tools() {
     let registry = ros2_registry_default();
-    assert_eq!(registry.len(), 9);
+    assert_eq!(registry.len(), 11);
     let specs = registry.tool_specs();
     let names: Vec<&str> = specs.iter().map(|s| s.name.as_str()).collect();
     assert!(names.contains(&"ros2_list_nodes"));
@@ -152,6 +209,8 @@ fn test_ros2_registry_registers_all_tools() {
     assert!(names.contains(&"ros2_topic_info"));
     assert!(names.contains(&"ros2_node_info"));
     assert!(names.contains(&"ros2_param_get"));
+    assert!(names.contains(&"ros2_param_set"));
+    assert!(names.contains(&"ros2_service_call"));
     assert!(names.contains(&"ros2_doctor"));
 }
 
@@ -159,7 +218,7 @@ fn test_ros2_registry_registers_all_tools() {
 fn test_registry_as_openai_tools() {
     let registry = ros2_registry_default();
     let tools = registry.as_openai_tools();
-    assert_eq!(tools.len(), 9);
+    assert_eq!(tools.len(), 11);
     for t in &tools {
         assert_eq!(t["type"], json!("function"));
         assert!(t["function"]["name"].is_string());

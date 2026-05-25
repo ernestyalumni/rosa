@@ -132,7 +132,7 @@ fn print_banner(model: &str) {
     println!("┌─────────────────────────────────────────────────────┐");
     println!("│  rosa v{VERSION:<45}│");
     println!("│  model: {model:<44}│");
-    println!("│  type /tools for tool list  •  /quit to exit        │");
+    println!("│  /tools  /clear  /quit                              │");
     println!("└─────────────────────────────────────────────────────┘");
     if std::env::var("ROS_CONTAINER").is_ok() {
         println!("  ros2 → docker exec {}", std::env::var("ROS_CONTAINER").unwrap());
@@ -171,6 +171,11 @@ async fn run_repl(agent: &Agent, registry: &dyn rosa_core::agent::ToolDispatcher
             }
             "/tools" => {
                 print_tools(registry);
+                continue;
+            }
+            "/clear" => {
+                agent.clear_history().await;
+                println!("  conversation history cleared.");
                 continue;
             }
             _ => {}

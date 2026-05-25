@@ -19,6 +19,8 @@ pub mod list_services;
 pub mod list_topics;
 pub mod node_info;
 pub mod param_get;
+pub mod param_set;
+pub mod service_call;
 pub mod topic_echo;
 pub mod topic_info;
 
@@ -29,5 +31,7 @@ pub use list_services::ListServicesTool;
 pub use list_topics::ListTopicsTool;
 pub use node_info::NodeInfoTool;
 pub use param_get::ParamGetTool;
+pub use param_set::ParamSetTool;
+pub use service_call::ServiceCallTool;
 pub use topic_echo::TopicEchoTool;
 pub use topic_info::TopicInfoTool;

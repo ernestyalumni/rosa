@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use futures::StreamExt;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, info, instrument, warn};
 
 use crate::{
@@ -36,11 +36,21 @@ pub struct Agent {
     max_iterations: usize,
     max_context_tokens: usize,
     opts: ChatOptions,
+    /// Persistent conversation history across multiple REPL turns.
+    history: Mutex<History>,
 }
 
 impl Agent {
     pub fn builder() -> AgentBuilder {
         AgentBuilder::default()
+    }
+
+    /// Clear the conversation history (used by the `/clear` REPL command).
+    ///
+    /// The system prompt is re-injected automatically on the next turn.
+    pub async fn clear_history(&self) {
+        let mut h = self.history.lock().await;
+        *h = History::new();
     }
 
     /// Run the agent loop; collect all events and return the final answer.
@@ -76,10 +86,15 @@ impl Agent {
         query: &str,
         tx: mpsc::UnboundedSender<AgentEvent>,
     ) -> Result<()> {
-        let mut history = History::new();
-        history.push(Message::System {
-            content: self.system_prompt.clone(),
-        });
+        // Lock history for the duration of this turn.
+        let mut history = self.history.lock().await;
+
+        // Bootstrap the system prompt if this is the first turn (history empty).
+        if history.messages().is_empty() {
+            history.push(Message::System {
+                content: self.system_prompt.clone(),
+            });
+        }
         history.push(Message::User {
             content: query.to_owned(),
         });
@@ -253,6 +268,7 @@ impl AgentBuilder {
             max_iterations: self.max_iterations.unwrap_or(100),
             max_context_tokens: self.max_context_tokens.unwrap_or(120_000),
             opts: self.opts.unwrap_or_default(),
+            history: Mutex::new(History::new()),
         })
     }
 }

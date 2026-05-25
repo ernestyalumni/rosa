@@ -28,6 +28,19 @@ pub trait Ros2Runner: Send + Sync {
 pub type SharedRunner = Arc<dyn Ros2Runner>;
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// POSIX single-quote a string so it is safe to embed inside `bash -ic "…"`.
+///
+/// Single-quoted strings cannot contain a literal `'`, so we end the quote,
+/// insert an escaped `'`, then restart the quote — the classic `'...'\\''...'`
+/// trick.
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+// ---------------------------------------------------------------------------
 // Production: shell-out
 // ---------------------------------------------------------------------------
 
@@ -79,7 +92,12 @@ impl Ros2Runner for ShellRunner {
         let owned_ros2_cmd: String; // kept alive across the if-else
         let (program, full_args): (&str, Vec<&str>) =
             if let Some(ref container) = self.ros_container {
-                owned_ros2_cmd = format!("ros2 {}", args.join(" "));
+                // Shell-quote each arg so YAML bodies with spaces/quotes survive
+                // being passed through `bash -ic "ros2 <args>"`.
+                owned_ros2_cmd = format!(
+                    "ros2 {}",
+                    args.iter().map(|a| shell_quote(a)).collect::<Vec<_>>().join(" ")
+                );
                 ("docker", vec!["exec", container.as_str(), "bash", "-ic", &owned_ros2_cmd])
             } else {
                 owned_ros2_cmd = String::new(); // unused
