@@ -51,15 +51,19 @@ See `ARCHITECTURE.md` for crate layout, message contracts, and the tool trait.
 
 ## Phases (sequence + parallelism)
 
-| # | Phase                       | Owner        | Blocking | Parallel with |
-|---|-----------------------------|--------------|----------|---------------|
-| 1 | LangChain rip-out + branch  | any agent    | —        | 2             |
-| 2 | Rust core scaffold          | Rust agent   | —        | 1             |
-| 3 | LLM provider adapters       | Rust agent   | 2        | 4, 5          |
-| 4 | Tool trait + registry       | Rust agent   | 2        | 3, 5          |
-| 5 | ROS 2 bridge (r2r/rclrs)    | Rust agent   | 2        | 3, 4          |
-| 6 | Turtle demo port (Rust)     | Rust agent   | 3,4,5    | Monoclaw-ROS  |
-| 7 | Isaac + Starship sim        | Sim agent    | 6        | —             |
+| # | Phase                       | Owner        | Blocking | Parallel with | Status |
+|---|-----------------------------|--------------|----------|---------------|--------|
+| 1 | LangChain rip-out + branch  | any agent    | —        | 2             | ✅ done — commit 9e16804 |
+| 2 | Rust core scaffold          | Rust agent   | —        | 1             | ✅ done — commit 6f7679c; 5/5 tests pass |
+| 3 | LLM provider adapters       | Rust agent   | 2        | 4, 5          | ⏳ ready to start |
+| 4 | Tool trait + registry       | Rust agent   | 2        | 3, 5          | ⏳ ready to start |
+| 5 | ROS 2 bridge (r2r/rclrs)    | Rust agent   | 2        | 3, 4          | ⏳ ready to start |
+| 6 | Turtle demo port (Rust)     | Rust agent   | 3,4,5    | Monoclaw-ROS  | ⏳ blocked on 3+4+5 |
+| 7 | Isaac + Starship sim        | Sim agent    | 6        | —             | ⏳ blocked on 6 |
+
+Monoclaw Docker tracks:
+- `Monoclaw/Deployments/ROS/` — ✅ done — langchain stripped, host-network DDS, Rust toolchain. Branch: `feat/ros2-deploy-strip-langchain`.
+- `Monoclaw/Deployments/IsaacSim/` — ✅ done (first pass) — Dockerfile, compose, scripts created. USD + extensions pending task 07.
 
 Two parallel Docker tracks live in Monoclaw, not this repo:
 
