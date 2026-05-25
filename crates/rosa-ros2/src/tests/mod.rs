@@ -268,11 +268,21 @@ fn test_registry_as_openai_tools() {
 // ---------------------------------------------------------------------------
 // Integration tests (require live ROS 2 container — run with --include-ignored)
 // ---------------------------------------------------------------------------
+//
+// rosa does NOT install ros2 on the host. All ROS 2 commands go through
+// `docker exec` when `ROS_CONTAINER` is set. Always run integration tests
+// with that variable:
+//
+//   cd Monoclaw/Deployments/ROS && docker compose up -d
+//   ROS_CONTAINER=rosa-ros2 cargo test -p rosa-ros2 -- --include-ignored
+//
+// Without ROS_CONTAINER the ShellRunner tries to exec `ros2` on the host
+// and gets "No such file or directory".
 
-/// Requires the `Monoclaw/Deployments/ROS` docker-compose stack to be running.
-/// Run: `cargo test -p rosa-ros2 test_integration -- --include-ignored`
+/// Requires the `Monoclaw/Deployments/ROS` docker-compose stack running
+/// and `ROS_CONTAINER=rosa-ros2` set in the environment.
 #[tokio::test]
-#[ignore = "requires live ROS 2 (docker compose up in Monoclaw/Deployments/ROS)"]
+#[ignore = "requires: docker compose up -d (ROS) + ROS_CONTAINER=rosa-ros2 env var"]
 async fn test_integration_list_topics_finds_parameter_events() {
     use crate::tools::ListTopicsTool;
     let tool = ListTopicsTool::new(vec![]);
@@ -289,7 +299,7 @@ async fn test_integration_list_topics_finds_parameter_events() {
 }
 
 #[tokio::test]
-#[ignore = "requires live ROS 2 (docker compose up in Monoclaw/Deployments/ROS)"]
+#[ignore = "requires: docker compose up -d (ROS) + ROS_CONTAINER=rosa-ros2 env var"]
 async fn test_integration_doctor_passes() {
     use crate::tools::DoctorTool;
     let tool = DoctorTool::new(vec![]);
