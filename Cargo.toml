@@ -40,3 +40,6 @@ async-stream = "0.3"
 
 # Schema derivation (tools)
 schemars    = "0.8"
+
+# Env file loading
+dotenvy     = "0.15"

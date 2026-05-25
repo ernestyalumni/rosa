@@ -10,3 +10,6 @@ docs
 # Rust build artifacts
 /target/
 Cargo.lock
+
+# Secrets — never commit
+.env

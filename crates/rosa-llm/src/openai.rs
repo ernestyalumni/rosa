@@ -30,25 +30,25 @@ use rosa_core::{
 use crate::common::sse::sse_events;
 
 const OPENAI_BASE_URL: &str = "https://api.openai.com";
-const OLLAMA_BASE_URL: &str = "http://localhost:11434";
 const XAI_BASE_URL:   &str = "https://api.x.ai";
 
 // ---------------------------------------------------------------------------
 // Provider struct
 // ---------------------------------------------------------------------------
 
-/// HTTP adapter for any OpenAI-compatible chat completions endpoint.
+/// HTTP adapter for OpenAI-compatible chat completions endpoints.
 ///
 /// ```no_run
-/// // OpenAI
 /// use rosa_llm::OpenAiProvider;
-/// let openai  = OpenAiProvider::new(std::env::var("OPENAI_API_KEY").unwrap());
 ///
-/// // Ollama (no key required)
-/// let ollama  = OpenAiProvider::ollama();
+/// // OpenAI
+/// let openai = OpenAiProvider::new(std::env::var("OPENAI_API_KEY").unwrap());
 ///
-/// // Custom endpoint
-/// let custom  = OpenAiProvider::new("key").with_base_url("http://localhost:8080");
+/// // xAI Grok
+/// let xai = OpenAiProvider::xai(std::env::var("XAI_API_KEY").unwrap());
+///
+/// // Custom OpenAI-compatible endpoint
+/// let custom = OpenAiProvider::new("key").with_base_url("http://my-proxy:8080");
 /// ```
 pub struct OpenAiProvider {
     client: reqwest::Client,
@@ -66,20 +66,10 @@ impl OpenAiProvider {
         }
     }
 
-    /// Connect to a local Ollama instance (`http://localhost:11434`).
-    /// No API key is required.
-    pub fn ollama() -> Self {
-        Self {
-            client: reqwest::Client::new(),
-            api_key: String::new(),
-            base_url: OLLAMA_BASE_URL.into(),
-        }
-    }
-
     /// Connect to the xAI Grok API (`https://api.x.ai`).
     ///
     /// xAI's API is OpenAI-compatible; pass your `XAI_API_KEY`.
-    /// Default model: `grok-3-mini`. Override with `ROSA_MODEL`.
+    /// Override the default model with the `ROSA_MODEL` env var.
     ///
     /// ```no_run
     /// use rosa_llm::OpenAiProvider;

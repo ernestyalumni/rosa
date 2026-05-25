@@ -3,11 +3,16 @@
 //! ## Usage
 //!
 //! ```bash
-//! # With Anthropic API (default model: claude-sonnet-4-6)
-//! ANTHROPIC_API_KEY=sk-ant-... cargo run -p rosa-cli
+//! # Copy .env.example → .env, fill in your key, then:
+//! cargo run -p rosa-cli
 //!
-//! # With OpenAI
-//! OPENAI_API_KEY=sk-... ROSA_MODEL=gpt-4o cargo run -p rosa-cli
+//! # Or pass keys inline (env vars override .env)
+//! ANTHROPIC_API_KEY=sk-ant-... cargo run -p rosa-cli
+//! XAI_API_KEY=xai-...         cargo run -p rosa-cli
+//! OPENAI_API_KEY=sk-...       cargo run -p rosa-cli
+//!
+//! # Override model for any provider
+//! ANTHROPIC_API_KEY=... ROSA_MODEL=claude-opus-4-7 cargo run -p rosa-cli
 //!
 //! # Via docker exec into the ROS container
 //! ROS_CONTAINER=rosa-ros2 ANTHROPIC_API_KEY=... cargo run -p rosa-cli
@@ -38,6 +43,9 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[tokio::main]
 async fn main() {
+    // Load .env file if present (silently ignore if absent)
+    let _ = dotenvy::dotenv();
+
     // Logging — RUST_LOG=debug for verbose output
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -53,10 +61,8 @@ async fn main() {
         None => {
             eprintln!(
                 "rosa: no LLM API key found.\n\
-                 Set ANTHROPIC_API_KEY for Anthropic (recommended)\n\
-                 or XAI_API_KEY for xAI Grok\n\
-                 or OPENAI_API_KEY for OpenAI\n\
-                 or OLLAMA_MODEL to use a local Ollama model."
+                 Set ANTHROPIC_API_KEY, XAI_API_KEY, or OPENAI_API_KEY.\n\
+                 Copy .env.example → .env and fill in your key."
             );
             std::process::exit(1);
         }
@@ -102,7 +108,7 @@ fn detect_provider() -> Option<(Arc<dyn LlmProvider>, String)> {
     // 2. xAI Grok
     if let Ok(key) = std::env::var("XAI_API_KEY") {
         let model = std::env::var("ROSA_MODEL")
-            .unwrap_or_else(|_| "grok-3-mini".to_owned());
+            .unwrap_or_else(|_| "grok-4-3".to_owned());
         let p = rosa_llm::OpenAiProvider::xai(key);
         return Some((Arc::new(p), model));
     }
@@ -110,16 +116,8 @@ fn detect_provider() -> Option<(Arc<dyn LlmProvider>, String)> {
     // 3. OpenAI
     if let Ok(key) = std::env::var("OPENAI_API_KEY") {
         let model = std::env::var("ROSA_MODEL")
-            .unwrap_or_else(|_| "gpt-4o-mini".to_owned());
+            .unwrap_or_else(|_| "gpt-5.5".to_owned());
         let p = rosa_llm::OpenAiProvider::new(key);
-        return Some((Arc::new(p), model));
-    }
-
-    // 4. Ollama (no API key required; OLLAMA_MODEL must be set)
-    if let Ok(model) = std::env::var("OLLAMA_MODEL") {
-        let base = std::env::var("OLLAMA_BASE_URL")
-            .unwrap_or_else(|_| "http://localhost:11434".to_owned());
-        let p = rosa_llm::OpenAiProvider::ollama().with_base_url(base);
         return Some((Arc::new(p), model));
     }
 

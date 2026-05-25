@@ -346,6 +346,8 @@ fn starship_registry() -> ToolRegistry {
 
 #[tokio::main]
 async fn main() {
+    let _ = dotenvy::dotenv();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -355,7 +357,7 @@ async fn main() {
         .init();
 
     let (provider, model) = detect_provider().unwrap_or_else(|| {
-        eprintln!("Set ANTHROPIC_API_KEY, OPENAI_API_KEY, or OLLAMA_MODEL.");
+        eprintln!("Set ANTHROPIC_API_KEY, XAI_API_KEY, or OPENAI_API_KEY (or copy .env.example → .env).");
         std::process::exit(1);
     });
 
@@ -415,16 +417,12 @@ fn detect_provider() -> Option<(Arc<dyn rosa_core::provider::LlmProvider>, Strin
         return Some((Arc::new(rosa_llm::AnthropicProvider::new(key)), model));
     }
     if let Ok(key) = std::env::var("XAI_API_KEY") {
-        let model = std::env::var("ROSA_MODEL").unwrap_or_else(|_| "grok-3-mini".to_owned());
+        let model = std::env::var("ROSA_MODEL").unwrap_or_else(|_| "grok-4-3".to_owned());
         return Some((Arc::new(rosa_llm::OpenAiProvider::xai(key)), model));
     }
     if let Ok(key) = std::env::var("OPENAI_API_KEY") {
-        let model = std::env::var("ROSA_MODEL").unwrap_or_else(|_| "gpt-4o-mini".to_owned());
+        let model = std::env::var("ROSA_MODEL").unwrap_or_else(|_| "gpt-5.5".to_owned());
         return Some((Arc::new(rosa_llm::OpenAiProvider::new(key)), model));
-    }
-    if let Ok(model) = std::env::var("OLLAMA_MODEL") {
-        let base = std::env::var("OLLAMA_BASE_URL").unwrap_or_else(|_| "http://localhost:11434".to_owned());
-        return Some((Arc::new(rosa_llm::OpenAiProvider::ollama().with_base_url(base)), model));
     }
     None
 }
