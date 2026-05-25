@@ -68,17 +68,29 @@ impl Default for ShellRunner {
 #[async_trait]
 impl Ros2Runner for ShellRunner {
     async fn run(&self, args: &[&str]) -> Result<String> {
-        // Build the argv depending on whether we use docker exec
+        // Build the command.
+        //
+        // Direct mode: `ros2 <args>`
+        //
+        // Docker exec mode: `docker exec <container> bash -ic "ros2 <args>"`
+        //   We must go through `bash -ic` so the container's
+        //   `/opt/ros/humble/setup.bash` is sourced (baked into .bashrc by the
+        //   Dockerfile). Without it, `ros2` is not in PATH.
+        let owned_ros2_cmd: String; // kept alive across the if-else
         let (program, full_args): (&str, Vec<&str>) =
             if let Some(ref container) = self.ros_container {
-                let mut v: Vec<&str> = vec!["exec", container.as_str(), "ros2"];
-                v.extend_from_slice(args);
-                ("docker", v)
+                owned_ros2_cmd = format!("ros2 {}", args.join(" "));
+                ("docker", vec!["exec", container.as_str(), "bash", "-ic", &owned_ros2_cmd])
             } else {
+                owned_ros2_cmd = String::new(); // unused
                 ("ros2", args.to_vec())
             };
 
-        let label = format!("{} {}", program, full_args.join(" "));
+        let label = if self.ros_container.is_some() {
+            format!("docker exec {} {}", self.ros_container.as_deref().unwrap_or(""), &owned_ros2_cmd)
+        } else {
+            format!("ros2 {}", args.join(" "))
+        };
 
         let fut = tokio::process::Command::new(program)
             .args(&full_args)

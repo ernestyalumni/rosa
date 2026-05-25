@@ -199,8 +199,9 @@ async fn test_integration_doctor_passes() {
     let tool = DoctorTool::new(vec![]);
     let result = tool.execute(json!({})).await.unwrap();
     let report = result["report"].as_str().unwrap();
+    // `ros2 doctor --report` uses "OK" for status; `ros2 doctor` says "All N checks passed"
     assert!(
-        report.contains("passed") || report.contains("ok"),
+        report.to_lowercase().contains("ok") || report.contains("passed"),
         "expected doctor to pass, got:\n{report}"
     );
 }
