@@ -32,35 +32,40 @@
 > [!IMPORTANT]
 > 📚 **New to ROSA?** Check out our [Wiki](https://github.com/nasa-jpl/rosa/wiki) for documentation, guides and FAQs!
 
+> [!WARNING]
+> 🚧 **This fork (`ernestyalumni/rosa`) is under active Rust rewrite on branch `feat/rust-rewrite`.**
+> LangChain has been removed. The Python `jpl-rosa` package is no longer published from this fork.
+> See [`ORCHESTRATION.md`](ORCHESTRATION.md) for the rewrite plan and [`ARCHITECTURE.md`](ARCHITECTURE.md) for the Rust crate layout.
 
-ROSA is your AI-powered assistant for ROS1 and ROS2 systems. Built on the [Langchain](https://python.langchain.com/v0.2/docs/introduction/) framework, ROSA helps you interact with robots using natural language, making robotics development more accessible and efficient.
+ROSA is an AI-powered assistant for ROS 2 systems that lets you interact with robots using natural language.
+This fork replaces the upstream Python + LangChain implementation with a **Rust-first agent** (`rosa-cli`) that talks to ROS 2 via DDS — zero LangChain, zero host ROS install required (ROS 2 runs in Docker).
 
 #### ROSA Demo: NeBula-Spot in JPL's Mars Yard (click for YouTube)
 [![Spot YouTube Thumbnail](https://github.com/user-attachments/assets/19a99b5c-6103-4be4-8875-1810cf4558c5)](https://www.youtube.com/watch?v=mZTrSg7tEsA)
 
 
-## 🚀 Quick Start
+## 🚀 Quick Start (Rust rewrite)
 
 ### Requirements
-- Python 3.9+
-- ROS Noetic or higher
+- Rust stable (`rustup`)
+- Docker + Docker Compose
+- `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`
 
-### Installation
+### Run
+
 ```bash
-pip3 install jpl-rosa
+# 1. Start the ROS 2 container
+cd Monoclaw/Deployments/ROS && docker compose up -d
+
+# 2. Build and run rosa
+cd /path/to/rosa
+cargo run --release -- ask "list ROS 2 topics"
+
+# 3. Interactive REPL
+cargo run --release
 ```
 
-### Usage Examples
-
-```python
-from rosa import ROSA
-
-llm = get_your_llm_here()
-agent = ROSA(ros_version=1, llm=llm)
-agent.invoke("Show me a list of topics that have publishers but no subscribers")
-```
-
-For detailed information on configuring the LLM, please refer to our [Model Configuration Wiki page](https://github.com/nasa-jpl/rosa/wiki/Model-Configuration).
+See [`ORCHESTRATION.md`](ORCHESTRATION.md) for the full build plan and sub-agent task briefs.
 
 
 ## Adapting ROSA for Your Robot 🔧
