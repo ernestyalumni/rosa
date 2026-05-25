@@ -54,6 +54,7 @@ async fn main() {
             eprintln!(
                 "rosa: no LLM API key found.\n\
                  Set ANTHROPIC_API_KEY for Anthropic (recommended)\n\
+                 or XAI_API_KEY for xAI Grok\n\
                  or OPENAI_API_KEY for OpenAI\n\
                  or OLLAMA_MODEL to use a local Ollama model."
             );
@@ -98,7 +99,15 @@ fn detect_provider() -> Option<(Arc<dyn LlmProvider>, String)> {
         return Some((Arc::new(p), model));
     }
 
-    // 2. OpenAI
+    // 2. xAI Grok
+    if let Ok(key) = std::env::var("XAI_API_KEY") {
+        let model = std::env::var("ROSA_MODEL")
+            .unwrap_or_else(|_| "grok-3-mini".to_owned());
+        let p = rosa_llm::OpenAiProvider::xai(key);
+        return Some((Arc::new(p), model));
+    }
+
+    // 3. OpenAI
     if let Ok(key) = std::env::var("OPENAI_API_KEY") {
         let model = std::env::var("ROSA_MODEL")
             .unwrap_or_else(|_| "gpt-4o-mini".to_owned());
@@ -106,7 +115,7 @@ fn detect_provider() -> Option<(Arc<dyn LlmProvider>, String)> {
         return Some((Arc::new(p), model));
     }
 
-    // 3. Ollama (no API key required; OLLAMA_MODEL must be set)
+    // 4. Ollama (no API key required; OLLAMA_MODEL must be set)
     if let Ok(model) = std::env::var("OLLAMA_MODEL") {
         let base = std::env::var("OLLAMA_BASE_URL")
             .unwrap_or_else(|_| "http://localhost:11434".to_owned());

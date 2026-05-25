@@ -29,8 +29,9 @@ use rosa_core::{
 
 use crate::common::sse::sse_events;
 
-const OPENAI_BASE_URL: &str  = "https://api.openai.com";
-const OLLAMA_BASE_URL: &str  = "http://localhost:11434";
+const OPENAI_BASE_URL: &str = "https://api.openai.com";
+const OLLAMA_BASE_URL: &str = "http://localhost:11434";
+const XAI_BASE_URL:   &str = "https://api.x.ai";
 
 // ---------------------------------------------------------------------------
 // Provider struct
@@ -72,6 +73,23 @@ impl OpenAiProvider {
             client: reqwest::Client::new(),
             api_key: String::new(),
             base_url: OLLAMA_BASE_URL.into(),
+        }
+    }
+
+    /// Connect to the xAI Grok API (`https://api.x.ai`).
+    ///
+    /// xAI's API is OpenAI-compatible; pass your `XAI_API_KEY`.
+    /// Default model: `grok-3-mini`. Override with `ROSA_MODEL`.
+    ///
+    /// ```no_run
+    /// use rosa_llm::OpenAiProvider;
+    /// let xai = OpenAiProvider::xai(std::env::var("XAI_API_KEY").unwrap());
+    /// ```
+    pub fn xai(api_key: impl Into<String>) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            api_key: api_key.into(),
+            base_url: XAI_BASE_URL.into(),
         }
     }
 
