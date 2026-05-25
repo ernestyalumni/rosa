@@ -32,13 +32,26 @@ pub type SharedRunner = Arc<dyn Ros2Runner>;
 // ---------------------------------------------------------------------------
 
 /// Spawns `ros2 <args>` via `tokio::process::Command` with a timeout.
+///
+/// If the `ROS_CONTAINER` environment variable is set, prefixes every command
+/// with `docker exec <container>`, allowing rosa to run on the host while the
+/// ROS 2 tools execute inside the container:
+///
+/// ```bash
+/// ROS_CONTAINER=rosa-ros2 cargo run --example turtle -p rosa-cli
+/// ```
 pub struct ShellRunner {
     pub timeout_secs: u64,
+    /// If Some, use `docker exec <container> ros2 …` instead of `ros2 …`.
+    pub ros_container: Option<String>,
 }
 
 impl ShellRunner {
     pub fn new() -> Self {
-        Self { timeout_secs: 5 }
+        Self {
+            timeout_secs: 5,
+            ros_container: std::env::var("ROS_CONTAINER").ok(),
+        }
     }
 
     pub fn shared() -> SharedRunner {
@@ -55,9 +68,21 @@ impl Default for ShellRunner {
 #[async_trait]
 impl Ros2Runner for ShellRunner {
     async fn run(&self, args: &[&str]) -> Result<String> {
-        let label = format!("ros2 {}", args.join(" "));
+        // Build the argv depending on whether we use docker exec
+        let (program, full_args): (&str, Vec<&str>) =
+            if let Some(ref container) = self.ros_container {
+                let mut v: Vec<&str> = vec!["exec", container.as_str(), "ros2"];
+                v.extend_from_slice(args);
+                ("docker", v)
+            } else {
+                ("ros2", args.to_vec())
+            };
 
-        let fut = tokio::process::Command::new("ros2").args(args).output();
+        let label = format!("{} {}", program, full_args.join(" "));
+
+        let fut = tokio::process::Command::new(program)
+            .args(&full_args)
+            .output();
 
         let output = timeout(Duration::from_secs(self.timeout_secs), fut)
             .await
