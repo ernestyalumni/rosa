@@ -20,6 +20,13 @@ pub enum AgentEvent {
     /// The agent produced a final answer (no more tool calls).
     Final { content: String },
 
+    /// Token usage reported by the provider at the end of a generation step.
+    /// Emitted once per LLM call that returns usage data.
+    Usage {
+        prompt_tokens: u32,
+        completion_tokens: u32,
+    },
+
     /// An unrecoverable error occurred; the loop will exit.
     Error { message: String },
 }

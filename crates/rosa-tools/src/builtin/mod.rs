@@ -28,8 +28,14 @@ pub mod wait;
 pub use calculation::AddTool;
 pub use log::LogMessageTool;
 pub use math::{
+    // core navigation math (original set)
     Atan2, Cos, DegreesToRadians, Distance2D, Divide,
     HeadingAndDistance, Multiply, RadiansToDegrees, Sin, Sqrt, Subtract, Tan,
+    // additional math parity
+    Acos, Asin, Atan, Cosh, Exponentiate, Modulo, Sinh, Tanh,
+    AddAll, MultiplyAll,
+    Mean, Median, Variance,
+    CountItems, CountLines, CountWords,
 };
 pub use system::SystemInfoTool;
 pub use wait::WaitTool;

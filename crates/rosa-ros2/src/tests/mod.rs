@@ -14,7 +14,7 @@ use crate::{
     runner::MockRunner,
     tools::{
         DoctorTool, ListNodesTool, ListServicesTool, ListTopicsTool,
-        ParamSetTool, ServiceCallTool, TopicEchoTool,
+        ParamSetTool, ServiceCallTool, ServiceInfoTool, TopicEchoTool,
     },
     ros2_registry_default,
 };
@@ -179,6 +179,41 @@ async fn test_service_call_defaults_empty_request() {
 }
 
 // ---------------------------------------------------------------------------
+// ros2_service_info (with MockRunner)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_service_info_returns_type_for_each_service() {
+    let runner = MockRunner::new("turtlesim/srv/Spawn");
+    let tool = ServiceInfoTool::with_runner(runner, vec![]);
+    let result = tool
+        .execute(serde_json::json!({
+            "services": ["/turtlesim/spawn"]
+        }))
+        .await
+        .unwrap();
+    assert_eq!(
+        result["/turtlesim/spawn"].as_str().unwrap(),
+        "turtlesim/srv/Spawn"
+    );
+}
+
+#[tokio::test]
+async fn test_service_info_handles_multiple_services() {
+    // MockRunner returns the same string for every call
+    let runner = MockRunner::new("std_srvs/srv/Empty");
+    let tool = ServiceInfoTool::with_runner(runner, vec![]);
+    let result = tool
+        .execute(serde_json::json!({
+            "services": ["/turtlesim/clear", "/turtlesim/reset"]
+        }))
+        .await
+        .unwrap();
+    assert!(result["/turtlesim/clear"].is_string());
+    assert!(result["/turtlesim/reset"].is_string());
+}
+
+// ---------------------------------------------------------------------------
 // ros2_doctor (with MockRunner)
 // ---------------------------------------------------------------------------
 
@@ -198,7 +233,7 @@ async fn test_doctor_returns_report() {
 #[test]
 fn test_ros2_registry_registers_all_tools() {
     let registry = ros2_registry_default();
-    assert_eq!(registry.len(), 11);
+    assert_eq!(registry.len(), 13);
     let specs = registry.tool_specs();
     let names: Vec<&str> = specs.iter().map(|s| s.name.as_str()).collect();
     assert!(names.contains(&"ros2_list_nodes"));
@@ -211,14 +246,16 @@ fn test_ros2_registry_registers_all_tools() {
     assert!(names.contains(&"ros2_param_get"));
     assert!(names.contains(&"ros2_param_set"));
     assert!(names.contains(&"ros2_service_call"));
+    assert!(names.contains(&"ros2_service_info"));
     assert!(names.contains(&"ros2_doctor"));
+    assert!(names.contains(&"roslog_list"));
 }
 
 #[test]
 fn test_registry_as_openai_tools() {
     let registry = ros2_registry_default();
     let tools = registry.as_openai_tools();
-    assert_eq!(tools.len(), 11);
+    assert_eq!(tools.len(), 13);
     for t in &tools {
         assert_eq!(t["type"], json!("function"));
         assert!(t["function"]["name"].is_string());

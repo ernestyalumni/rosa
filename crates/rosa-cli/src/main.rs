@@ -237,6 +237,13 @@ fn render_event(event: AgentEvent) {
             // Tokens were already printed; just ensure a trailing newline
             println!();
         }
+        AgentEvent::Usage { prompt_tokens, completion_tokens } => {
+            eprintln!(
+                "\x1b[2m  [tokens] prompt={prompt_tokens} completion={completion_tokens} \
+                 total={}\x1b[0m",
+                prompt_tokens + completion_tokens
+            );
+        }
         AgentEvent::Error { message } => {
             eprintln!("\n\x1b[31m[error] {message}\x1b[0m");
         }

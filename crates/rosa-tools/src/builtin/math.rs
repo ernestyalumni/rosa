@@ -13,9 +13,25 @@
 //! | `subtract`            | a − b                                          |
 //! | `multiply`            | a × b                                          |
 //! | `divide`              | a ÷ b (errors on zero denominator)             |
+//! | `exponentiate`        | a ^ b                                          |
+//! | `modulo`              | a % b                                          |
 //! | `sin`                 | sin of angle in radians                        |
 //! | `cos`                 | cos of angle in radians                        |
 //! | `tan`                 | tan of angle in radians                        |
+//! | `asin`                | arcsine → radians                              |
+//! | `acos`                | arccosine → radians                            |
+//! | `atan`                | arctangent (single-arg) → radians              |
+//! | `sinh`                | hyperbolic sine                                |
+//! | `cosh`                | hyperbolic cosine                              |
+//! | `tanh`                | hyperbolic tangent                             |
+//! | `add_all`             | sum of a list of numbers                       |
+//! | `multiply_all`        | product of a list of numbers                   |
+//! | `mean`                | arithmetic mean + stdev of a list              |
+//! | `median`              | median of a list                               |
+//! | `variance`            | variance of a list                             |
+//! | `count_items`         | count elements in a JSON array                 |
+//! | `count_words`         | count whitespace-separated words in a string   |
+//! | `count_lines`         | count newline-delimited lines in a string      |
 
 use async_trait::async_trait;
 use schemars::{schema_for, schema::RootSchema, JsonSchema};
@@ -283,5 +299,317 @@ impl Tool for Tan {
     async fn execute(&self, args: Value) -> Result<Value> {
         let a: OneF64 = serde_json::from_value(args)?;
         Ok(json!({ "result": a.value.tan() }))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// exponentiate / modulo
+// ---------------------------------------------------------------------------
+
+pub struct Exponentiate;
+
+#[async_trait]
+impl Tool for Exponentiate {
+    fn name(&self) -> &str { "exponentiate" }
+    fn description(&self) -> &str { "Return a raised to the power b (a^b)." }
+    fn schema(&self) -> RootSchema { schema_for!(TwoF64) }
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: TwoF64 = serde_json::from_value(args)?;
+        Ok(json!({ "result": a.a.powf(a.b) }))
+    }
+}
+
+pub struct Modulo;
+
+#[async_trait]
+impl Tool for Modulo {
+    fn name(&self) -> &str { "modulo" }
+    fn description(&self) -> &str { "Return a % b (floating-point remainder). Errors if b is zero." }
+    fn schema(&self) -> RootSchema { schema_for!(TwoF64) }
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: TwoF64 = serde_json::from_value(args)?;
+        if a.b == 0.0 {
+            return Err(RosaError::ToolExecution {
+                name: "modulo".into(),
+                message: "modulo by zero".into(),
+            });
+        }
+        Ok(json!({ "result": a.a % a.b }))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// asin / acos / atan (single-argument)
+// ---------------------------------------------------------------------------
+
+pub struct Asin;
+
+#[async_trait]
+impl Tool for Asin {
+    fn name(&self) -> &str { "asin" }
+    fn description(&self) -> &str {
+        "Return the arcsine of a value in [-1, 1], in radians. Errors outside that range."
+    }
+    fn schema(&self) -> RootSchema { schema_for!(OneF64) }
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: OneF64 = serde_json::from_value(args)?;
+        if !(-1.0..=1.0).contains(&a.value) {
+            return Err(RosaError::ToolExecution {
+                name: "asin".into(),
+                message: format!("asin argument {} is outside [-1, 1]", a.value),
+            });
+        }
+        Ok(json!({ "radians": a.value.asin() }))
+    }
+}
+
+pub struct Acos;
+
+#[async_trait]
+impl Tool for Acos {
+    fn name(&self) -> &str { "acos" }
+    fn description(&self) -> &str {
+        "Return the arccosine of a value in [-1, 1], in radians. Errors outside that range."
+    }
+    fn schema(&self) -> RootSchema { schema_for!(OneF64) }
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: OneF64 = serde_json::from_value(args)?;
+        if !(-1.0..=1.0).contains(&a.value) {
+            return Err(RosaError::ToolExecution {
+                name: "acos".into(),
+                message: format!("acos argument {} is outside [-1, 1]", a.value),
+            });
+        }
+        Ok(json!({ "radians": a.value.acos() }))
+    }
+}
+
+pub struct Atan;
+
+#[async_trait]
+impl Tool for Atan {
+    fn name(&self) -> &str { "atan" }
+    fn description(&self) -> &str {
+        "Return the single-argument arctangent of x, in radians. \
+         For the angle between two points use atan2(y, x) instead."
+    }
+    fn schema(&self) -> RootSchema { schema_for!(OneF64) }
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: OneF64 = serde_json::from_value(args)?;
+        Ok(json!({ "radians": a.value.atan() }))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// sinh / cosh / tanh
+// ---------------------------------------------------------------------------
+
+pub struct Sinh;
+
+#[async_trait]
+impl Tool for Sinh {
+    fn name(&self) -> &str { "sinh" }
+    fn description(&self) -> &str { "Return the hyperbolic sine of x." }
+    fn schema(&self) -> RootSchema { schema_for!(OneF64) }
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: OneF64 = serde_json::from_value(args)?;
+        Ok(json!({ "result": a.value.sinh() }))
+    }
+}
+
+pub struct Cosh;
+
+#[async_trait]
+impl Tool for Cosh {
+    fn name(&self) -> &str { "cosh" }
+    fn description(&self) -> &str { "Return the hyperbolic cosine of x." }
+    fn schema(&self) -> RootSchema { schema_for!(OneF64) }
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: OneF64 = serde_json::from_value(args)?;
+        Ok(json!({ "result": a.value.cosh() }))
+    }
+}
+
+pub struct Tanh;
+
+#[async_trait]
+impl Tool for Tanh {
+    fn name(&self) -> &str { "tanh" }
+    fn description(&self) -> &str { "Return the hyperbolic tangent of x." }
+    fn schema(&self) -> RootSchema { schema_for!(OneF64) }
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: OneF64 = serde_json::from_value(args)?;
+        Ok(json!({ "result": a.value.tanh() }))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// List aggregation: add_all, multiply_all
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct NumberList {
+    /// List of numbers to aggregate.
+    pub numbers: Vec<f64>,
+}
+
+pub struct AddAll;
+
+#[async_trait]
+impl Tool for AddAll {
+    fn name(&self) -> &str { "add_all" }
+    fn description(&self) -> &str { "Return the sum of a list of numbers." }
+    fn schema(&self) -> RootSchema { schema_for!(NumberList) }
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: NumberList = serde_json::from_value(args)?;
+        Ok(json!({ "result": a.numbers.iter().sum::<f64>() }))
+    }
+}
+
+pub struct MultiplyAll;
+
+#[async_trait]
+impl Tool for MultiplyAll {
+    fn name(&self) -> &str { "multiply_all" }
+    fn description(&self) -> &str { "Return the product of a list of numbers." }
+    fn schema(&self) -> RootSchema { schema_for!(NumberList) }
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: NumberList = serde_json::from_value(args)?;
+        Ok(json!({ "result": a.numbers.iter().product::<f64>() }))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Statistics: mean, median, variance
+// ---------------------------------------------------------------------------
+
+pub struct Mean;
+
+#[async_trait]
+impl Tool for Mean {
+    fn name(&self) -> &str { "mean" }
+    fn description(&self) -> &str {
+        "Return the arithmetic mean and standard deviation of a list of numbers."
+    }
+    fn schema(&self) -> RootSchema { schema_for!(NumberList) }
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: NumberList = serde_json::from_value(args)?;
+        if a.numbers.is_empty() {
+            return Err(RosaError::ToolExecution {
+                name: "mean".into(),
+                message: "cannot compute mean of an empty list".into(),
+            });
+        }
+        let n = a.numbers.len() as f64;
+        let mean = a.numbers.iter().sum::<f64>() / n;
+        let variance = a.numbers.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n;
+        let stdev = variance.sqrt();
+        Ok(json!({ "mean": mean, "stdev": stdev }))
+    }
+}
+
+pub struct Median;
+
+#[async_trait]
+impl Tool for Median {
+    fn name(&self) -> &str { "median" }
+    fn description(&self) -> &str { "Return the median of a list of numbers." }
+    fn schema(&self) -> RootSchema { schema_for!(NumberList) }
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: NumberList = serde_json::from_value(args)?;
+        if a.numbers.is_empty() {
+            return Err(RosaError::ToolExecution {
+                name: "median".into(),
+                message: "cannot compute median of an empty list".into(),
+            });
+        }
+        let mut sorted = a.numbers.clone();
+        sorted.sort_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
+        let mid = sorted.len() / 2;
+        let median = if sorted.len() % 2 == 0 {
+            (sorted[mid - 1] + sorted[mid]) / 2.0
+        } else {
+            sorted[mid]
+        };
+        Ok(json!({ "median": median }))
+    }
+}
+
+pub struct Variance;
+
+#[async_trait]
+impl Tool for Variance {
+    fn name(&self) -> &str { "variance" }
+    fn description(&self) -> &str {
+        "Return the population variance of a list of numbers."
+    }
+    fn schema(&self) -> RootSchema { schema_for!(NumberList) }
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: NumberList = serde_json::from_value(args)?;
+        if a.numbers.len() < 2 {
+            return Err(RosaError::ToolExecution {
+                name: "variance".into(),
+                message: "need at least 2 numbers to compute variance".into(),
+            });
+        }
+        let n = a.numbers.len() as f64;
+        let mean = a.numbers.iter().sum::<f64>() / n;
+        let variance = a.numbers.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n;
+        Ok(json!({ "variance": variance }))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Count helpers: count_items, count_words, count_lines
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CountItemsArgs {
+    /// A JSON array whose elements will be counted.
+    pub items: Vec<serde_json::Value>,
+}
+
+pub struct CountItems;
+
+#[async_trait]
+impl Tool for CountItems {
+    fn name(&self) -> &str { "count_items" }
+    fn description(&self) -> &str { "Return the number of elements in a JSON array." }
+    fn schema(&self) -> RootSchema { schema_for!(CountItemsArgs) }
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: CountItemsArgs = serde_json::from_value(args)?;
+        Ok(json!({ "count": a.items.len() }))
+    }
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct TextArg {
+    /// The text to analyse.
+    pub text: String,
+}
+
+pub struct CountWords;
+
+#[async_trait]
+impl Tool for CountWords {
+    fn name(&self) -> &str { "count_words" }
+    fn description(&self) -> &str { "Return the number of whitespace-separated words in a string." }
+    fn schema(&self) -> RootSchema { schema_for!(TextArg) }
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: TextArg = serde_json::from_value(args)?;
+        Ok(json!({ "count": a.text.split_whitespace().count() }))
+    }
+}
+
+pub struct CountLines;
+
+#[async_trait]
+impl Tool for CountLines {
+    fn name(&self) -> &str { "count_lines" }
+    fn description(&self) -> &str { "Return the number of newline-delimited lines in a string." }
+    fn schema(&self) -> RootSchema { schema_for!(TextArg) }
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: TextArg = serde_json::from_value(args)?;
+        Ok(json!({ "count": a.text.lines().count() }))
     }
 }

@@ -140,6 +140,10 @@ impl Agent {
                                 completion_tokens = u.completion_tokens,
                                 "token usage"
                             );
+                            let _ = tx.send(AgentEvent::Usage {
+                                prompt_tokens: u.prompt_tokens,
+                                completion_tokens: u.completion_tokens,
+                            });
                         }
                     }
                 }
