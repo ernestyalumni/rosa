@@ -73,3 +73,123 @@ pub fn sse_events(
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::sse_events;
+    use bytes::Bytes;
+    use futures::StreamExt;
+
+    /// Feed static byte slices into `sse_events` and collect all events.
+    ///
+    /// `b"..."` literals are `&'static [u8]`, so `Bytes::from_static` is
+    /// zero-copy and the resulting stream satisfies the `'static` bound.
+    async fn parse(chunks: &[&'static [u8]]) -> Vec<(String, String)> {
+        let items: Vec<reqwest::Result<Bytes>> = chunks
+            .iter()
+            .map(|&b| Ok(Bytes::from_static(b)))
+            .collect();
+        sse_events(futures::stream::iter(items)).collect().await
+    }
+
+    // ── basic parsing ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_single_data_event() {
+        let events = parse(&[b"data: hello\n\n"]).await;
+        assert_eq!(events, vec![("message".to_owned(), "hello".to_owned())]);
+    }
+
+    #[tokio::test]
+    async fn test_named_event_type() {
+        // event: field sets the type for the next dispatch
+        let events = parse(&[b"event: ping\ndata: {}\n\n"]).await;
+        assert_eq!(events, vec![("ping".to_owned(), "{}".to_owned())]);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_data_lines_joined_with_newline() {
+        // RFC 8898: multiple data: lines are concatenated with \n
+        let events = parse(&[b"data: line1\ndata: line2\n\n"]).await;
+        assert_eq!(events, vec![("message".to_owned(), "line1\nline2".to_owned())]);
+    }
+
+    // ── line-ending variants ─────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_crlf_line_endings_stripped() {
+        // Windows-style \r\n is the same as \n (CR stripped)
+        let events = parse(&[b"data: hello\r\n\r\n"]).await;
+        assert_eq!(events, vec![("message".to_owned(), "hello".to_owned())]);
+    }
+
+    // ── ignored field types ──────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_id_and_retry_lines_ignored() {
+        let events = parse(&[b"id: 123\nretry: 1000\ndata: payload\n\n"]).await;
+        assert_eq!(events, vec![("message".to_owned(), "payload".to_owned())]);
+    }
+
+    #[tokio::test]
+    async fn test_comment_lines_ignored() {
+        // Lines starting with ':' are SSE comments
+        let events = parse(&[b": this is a comment\ndata: real\n\n"]).await;
+        assert_eq!(events, vec![("message".to_owned(), "real".to_owned())]);
+    }
+
+    // ── boundary conditions ──────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_blank_line_without_data_does_not_yield() {
+        // Multiple blank lines before actual data → only one event at the end
+        let events = parse(&[b"\n\n\ndata: actual\n\n"]).await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].1, "actual");
+    }
+
+    #[tokio::test]
+    async fn test_no_trailing_blank_line_flushed_at_stream_end() {
+        // Stream ends without the closing blank line — still yields
+        let events = parse(&[b"data: eof\n"]).await;
+        assert_eq!(events, vec![("message".to_owned(), "eof".to_owned())]);
+    }
+
+    // ── multi-event streams ──────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_multiple_events_in_sequence() {
+        let events = parse(&[b"data: first\n\ndata: second\n\n"]).await;
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].1, "first");
+        assert_eq!(events[1].1, "second");
+    }
+
+    #[tokio::test]
+    async fn test_event_type_resets_to_message_after_each_event() {
+        // event: foo applies only to the NEXT event, then resets to "message"
+        let events = parse(&[b"event: foo\ndata: 1\n\ndata: 2\n\n"]).await;
+        assert_eq!(events[0], ("foo".to_owned(),     "1".to_owned()));
+        assert_eq!(events[1], ("message".to_owned(), "2".to_owned()));
+    }
+
+    // ── chunked delivery ─────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_bytes_split_mid_line_buffered_correctly() {
+        // Simulate TCP fragmentation: "data: hel" arrives first, then "lo\n\n"
+        let events = parse(&[b"data: hel", b"lo\n\n"]).await;
+        assert_eq!(events, vec![("message".to_owned(), "hello".to_owned())]);
+    }
+
+    #[tokio::test]
+    async fn test_event_boundary_split_across_chunks() {
+        // First chunk ends exactly on the first \n of the blank-line boundary
+        let events = parse(&[b"data: x\n", b"\n"]).await;
+        assert_eq!(events, vec![("message".to_owned(), "x".to_owned())]);
+    }
+}

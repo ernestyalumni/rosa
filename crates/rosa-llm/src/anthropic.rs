@@ -287,3 +287,136 @@ impl LlmProvider for AnthropicProvider {
         Ok(Box::pin(chunk_stream))
     }
 }
+
+// ---------------------------------------------------------------------------
+// Tests — message/tool serialisation (no HTTP required)
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::AnthropicProvider;
+    use rosa_core::{
+        history::{Message, ToolCall},
+        provider::ToolSpec,
+    };
+    use serde_json::json;
+
+    fn tool_spec(name: &str) -> ToolSpec {
+        ToolSpec {
+            name: name.to_owned(),
+            description: "a tool".to_owned(),
+            parameters: json!({ "type": "object", "properties": {} }),
+        }
+    }
+
+    // ── to_anthropic_messages ────────────────────────────────────────────────
+
+    #[test]
+    fn test_system_extracted_as_top_level_field() {
+        // Anthropic takes the system prompt separately; it must NOT appear in
+        // the messages array.
+        let (system, messages) = AnthropicProvider::to_anthropic_messages(&[
+            Message::System { content: "be helpful".to_owned() },
+        ]);
+        assert_eq!(system, Some("be helpful".to_owned()));
+        assert!(messages.is_empty(), "System must not appear in messages array");
+    }
+
+    #[test]
+    fn test_system_none_when_absent() {
+        let (system, _) = AnthropicProvider::to_anthropic_messages(&[
+            Message::User { content: "hi".to_owned() },
+        ]);
+        assert!(system.is_none());
+    }
+
+    #[test]
+    fn test_user_message_serialized() {
+        let (_, msgs) = AnthropicProvider::to_anthropic_messages(&[
+            Message::User { content: "hello".to_owned() },
+        ]);
+        assert_eq!(msgs[0]["role"],    json!("user"));
+        assert_eq!(msgs[0]["content"], json!("hello"));
+    }
+
+    #[test]
+    fn test_assistant_text_becomes_blocks_array() {
+        // Anthropic uses content blocks, not a flat string
+        let (_, msgs) = AnthropicProvider::to_anthropic_messages(&[
+            Message::Assistant { content: Some("reply".to_owned()), tool_calls: vec![] },
+        ]);
+        assert_eq!(msgs[0]["role"], json!("assistant"));
+        let blocks = msgs[0]["content"].as_array().unwrap();
+        assert_eq!(blocks[0]["type"], json!("text"));
+        assert_eq!(blocks[0]["text"], json!("reply"));
+    }
+
+    #[test]
+    fn test_assistant_with_tool_call_in_blocks() {
+        let tc = ToolCall {
+            id: "call_1".to_owned(),
+            name: "add".to_owned(),
+            arguments: json!({ "a": 1, "b": 2 }),
+        };
+        let (_, msgs) = AnthropicProvider::to_anthropic_messages(&[
+            Message::Assistant { content: None, tool_calls: vec![tc] },
+        ]);
+        let blocks = msgs[0]["content"].as_array().unwrap();
+        assert_eq!(blocks[0]["type"],  json!("tool_use"));
+        assert_eq!(blocks[0]["id"],    json!("call_1"));
+        assert_eq!(blocks[0]["name"],  json!("add"));
+        assert_eq!(blocks[0]["input"], json!({ "a": 1, "b": 2 }));
+    }
+
+    #[test]
+    fn test_empty_assistant_gets_placeholder_text_block() {
+        // Anthropic API rejects an empty blocks array — we inject a sentinel.
+        let (_, msgs) = AnthropicProvider::to_anthropic_messages(&[
+            Message::Assistant { content: None, tool_calls: vec![] },
+        ]);
+        let blocks = msgs[0]["content"].as_array().unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0], json!({ "type": "text", "text": "" }));
+    }
+
+    #[test]
+    fn test_tool_result_becomes_user_message_with_tool_result_block() {
+        // Anthropic convention: tool results travel as a *user* message
+        let (_, msgs) = AnthropicProvider::to_anthropic_messages(&[
+            Message::Tool { call_id: "call_1".to_owned(), content: "42".to_owned() },
+        ]);
+        assert_eq!(msgs[0]["role"], json!("user"));
+        let blocks = msgs[0]["content"].as_array().unwrap();
+        assert_eq!(blocks[0]["type"],        json!("tool_result"));
+        assert_eq!(blocks[0]["tool_use_id"], json!("call_1"));
+        assert_eq!(blocks[0]["content"],     json!("42"));
+    }
+
+    // ── to_anthropic_tools ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_tools_use_input_schema_not_parameters() {
+        // Anthropic uses "input_schema"; OpenAI uses "parameters". Wrong key
+        // causes the API to reject the request with a 400.
+        let tools = AnthropicProvider::to_anthropic_tools(&[tool_spec("echo")]);
+        assert_eq!(tools[0]["name"],        json!("echo"));
+        assert_eq!(tools[0]["description"], json!("a tool"));
+        assert!(tools[0]["input_schema"].is_object(),  "must have input_schema");
+        assert!(tools[0].get("parameters").is_none(),  "must NOT have parameters key");
+    }
+
+    #[test]
+    fn test_tools_empty_yields_empty_vec() {
+        assert!(AnthropicProvider::to_anthropic_tools(&[]).is_empty());
+    }
+
+    #[test]
+    fn test_multiple_tools_preserve_order() {
+        let specs = vec![tool_spec("alpha"), tool_spec("beta"), tool_spec("gamma")];
+        let tools = AnthropicProvider::to_anthropic_tools(&specs);
+        assert_eq!(tools.len(), 3);
+        assert_eq!(tools[0]["name"], json!("alpha"));
+        assert_eq!(tools[1]["name"], json!("beta"));
+        assert_eq!(tools[2]["name"], json!("gamma"));
+    }
+}

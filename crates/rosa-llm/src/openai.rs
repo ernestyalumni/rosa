@@ -296,3 +296,150 @@ impl LlmProvider for OpenAiProvider {
         Ok(Box::pin(chunk_stream))
     }
 }
+
+// ---------------------------------------------------------------------------
+// Tests — message/tool serialisation (no HTTP required)
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::OpenAiProvider;
+    use rosa_core::{
+        history::{Message, ToolCall},
+        provider::ToolSpec,
+    };
+    use serde_json::json;
+
+    fn tool_spec(name: &str) -> ToolSpec {
+        ToolSpec {
+            name: name.to_owned(),
+            description: "a tool".to_owned(),
+            parameters: json!({ "type": "object", "properties": {} }),
+        }
+    }
+
+    // ── to_openai_messages ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_system_stays_in_messages_array() {
+        // Unlike Anthropic, OpenAI keeps system in the messages array
+        let msgs = OpenAiProvider::to_openai_messages(&[
+            Message::System { content: "be concise".to_owned() },
+        ]);
+        assert_eq!(msgs[0]["role"],    json!("system"));
+        assert_eq!(msgs[0]["content"], json!("be concise"));
+    }
+
+    #[test]
+    fn test_user_message_serialized() {
+        let msgs = OpenAiProvider::to_openai_messages(&[
+            Message::User { content: "hello".to_owned() },
+        ]);
+        assert_eq!(msgs[0]["role"],    json!("user"));
+        assert_eq!(msgs[0]["content"], json!("hello"));
+    }
+
+    #[test]
+    fn test_tool_result_role_and_tool_call_id() {
+        // OpenAI tool results use role "tool" with tool_call_id (not tool_use_id)
+        let msgs = OpenAiProvider::to_openai_messages(&[
+            Message::Tool { call_id: "call_abc".to_owned(), content: "42".to_owned() },
+        ]);
+        assert_eq!(msgs[0]["role"],         json!("tool"));
+        assert_eq!(msgs[0]["tool_call_id"], json!("call_abc"));
+        assert_eq!(msgs[0]["content"],      json!("42"));
+    }
+
+    #[test]
+    fn test_assistant_with_tool_calls_includes_tool_calls_array() {
+        let tc = ToolCall {
+            id: "tc1".to_owned(),
+            name: "search".to_owned(),
+            arguments: json!({ "q": "rust" }),
+        };
+        let msgs = OpenAiProvider::to_openai_messages(&[
+            Message::Assistant { content: None, tool_calls: vec![tc] },
+        ]);
+        let tc_arr = msgs[0]["tool_calls"].as_array().unwrap();
+        assert_eq!(tc_arr[0]["id"],               json!("tc1"));
+        assert_eq!(tc_arr[0]["type"],             json!("function"));
+        assert_eq!(tc_arr[0]["function"]["name"], json!("search"));
+    }
+
+    #[test]
+    fn test_assistant_tool_call_arguments_serialized_as_json_string() {
+        // OpenAI API contract: arguments must be a JSON-encoded *string*,
+        // not a nested object. Wrong encoding causes tool call failures.
+        let tc = ToolCall {
+            id: "tc2".to_owned(),
+            name: "add".to_owned(),
+            arguments: json!({ "a": 1, "b": 2 }),
+        };
+        let msgs = OpenAiProvider::to_openai_messages(&[
+            Message::Assistant { content: None, tool_calls: vec![tc] },
+        ]);
+        let args = &msgs[0]["tool_calls"][0]["function"]["arguments"];
+        let args_str = args.as_str().expect("arguments must be a JSON string");
+
+        // Round-trip: the string should deserialise back to the original object
+        let parsed: serde_json::Value = serde_json::from_str(args_str).unwrap();
+        assert_eq!(parsed["a"], json!(1));
+        assert_eq!(parsed["b"], json!(2));
+    }
+
+    #[test]
+    fn test_assistant_no_tool_calls_omits_tool_calls_field() {
+        // When there are no tool calls, the key must be absent (not null, not [])
+        // to avoid confusing strict OpenAI parsers.
+        let msgs = OpenAiProvider::to_openai_messages(&[
+            Message::Assistant { content: Some("plain text".to_owned()), tool_calls: vec![] },
+        ]);
+        assert!(
+            msgs[0].get("tool_calls").is_none(),
+            "tool_calls key must be absent when there are no tool calls"
+        );
+    }
+
+    #[test]
+    fn test_message_order_preserved() {
+        let input = vec![
+            Message::System  { content: "sys".to_owned() },
+            Message::User    { content: "q".to_owned() },
+            Message::Assistant { content: Some("a".to_owned()), tool_calls: vec![] },
+        ];
+        let msgs = OpenAiProvider::to_openai_messages(&input);
+        assert_eq!(msgs[0]["role"], json!("system"));
+        assert_eq!(msgs[1]["role"], json!("user"));
+        assert_eq!(msgs[2]["role"], json!("assistant"));
+    }
+
+    // ── to_openai_tools ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_tools_use_parameters_not_input_schema() {
+        // OpenAI uses "parameters"; Anthropic uses "input_schema". Wrong key
+        // causes the API to ignore the schema and accept any input.
+        let tools = OpenAiProvider::to_openai_tools(&[tool_spec("echo")]);
+        assert_eq!(tools[0]["type"],                    json!("function"));
+        assert_eq!(tools[0]["function"]["name"],        json!("echo"));
+        assert_eq!(tools[0]["function"]["description"], json!("a tool"));
+        assert!(tools[0]["function"]["parameters"].is_object(), "must have parameters");
+        assert!(
+            tools[0]["function"].get("input_schema").is_none(),
+            "must NOT have input_schema key"
+        );
+    }
+
+    #[test]
+    fn test_tools_empty_yields_empty_vec() {
+        assert!(OpenAiProvider::to_openai_tools(&[]).is_empty());
+    }
+
+    #[test]
+    fn test_multiple_tools_preserve_order() {
+        let specs = vec![tool_spec("alpha"), tool_spec("beta")];
+        let tools = OpenAiProvider::to_openai_tools(&specs);
+        assert_eq!(tools[0]["function"]["name"], json!("alpha"));
+        assert_eq!(tools[1]["function"]["name"], json!("beta"));
+    }
+}
