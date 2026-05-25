@@ -33,6 +33,10 @@ tracing     = "0.1"
 
 # HTTP (adapters only)
 reqwest     = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
+bytes       = "1"
+
+# Async generators / stream combinators
+async-stream = "0.3"
 
 # Schema derivation (tools)
 schemars    = "0.8"
