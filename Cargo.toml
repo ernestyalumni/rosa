@@ -6,6 +6,7 @@ members = [
     "crates/rosa-tools",
     "crates/rosa-ros2",
     "crates/rosa-cli",
+    "crates/rosa-isaac",
 ]
 
 [workspace.package]

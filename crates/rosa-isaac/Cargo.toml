@@ -1,0 +1,36 @@
+[package]
+name        = "rosa-isaac"
+description = "Isaac Sim integration tools for the ROSA agent — timeline control, diagnostics, USD scene loading."
+version.workspace    = true
+authors.workspace    = true
+edition.workspace    = true
+license.workspace    = true
+repository.workspace = true
+
+[dependencies]
+# async runtime
+tokio       = { workspace = true }
+async-trait = { workspace = true }
+
+# serialization
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+
+# schema derivation (tool inputs)
+schemars    = { workspace = true }
+
+# error handling
+thiserror   = { workspace = true }
+
+# HTTP client to call the Isaac control server
+reqwest     = { workspace = true }
+
+# Tool trait
+rosa-core  = { path = "../rosa-core" }
+rosa-tools = { path = "../rosa-tools" }
+
+# Logging
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros"] }
