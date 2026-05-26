@@ -128,6 +128,11 @@ replacement. Each row is **✅ done**, **➕ intentionally extended**, or **🚫
 |---|---|---|
 | Turtlesim notebook/demo | `examples/turtle.rs` | ✅ + ➕ 13 turtle tools vs ~6 in Python |
 | Isaac Sim ("coming soon") | `examples/starship.rs` stub | ➕ FSW-style agent with 6 tools |
+| Isaac Sim extension: timeline tools | `crates/rosa-isaac` — 6 tools via HTTP | ➕ Exceeds: HTTP API vs Python-only extension |
+| Isaac Sim extension: /clock publish | OmniGraph in `enable_ros2_bridge.py` | 🔧 in progress — boot verification pending |
+| Isaac Sim extension: diagnostics | `get_diagnostics` tool → `GET /diagnostics` | ➕ Exceeds: Rob's was UI-only |
+| Isaac Sim extension: USD load | `load_usd` + `list_usds` tools | ➕ Exceeds: Rob had race-condition bug |
+| Isaac Sim headless mode | `ISAAC_MODE=headless` → full HTTP API works | ➕ Exceeds: Rob's extension couldn't do headless |
 
 ---
 
