@@ -34,6 +34,7 @@ use rosa_core::{
 };
 use rosa_tools::{Tool, ToolRegistry};
 use rosa_ros2::ros2_registry_default;
+use rosa_isaac::{IsaacClient, tools::all_isaac_tools};
 
 // ---------------------------------------------------------------------------
 // Shared ros2 helper (same as turtle.rs)
@@ -338,13 +339,38 @@ fn parse_float_field(output: &str, field: &str) -> Option<f64> {
 // ---------------------------------------------------------------------------
 
 fn starship_registry() -> ToolRegistry {
-    ros2_registry_default()
+    let base = ros2_registry_default()
         .register(StarshipGetTelemetry)
         .register(StarshipSetThrottle)
         .register(StarshipSetGimbal)
         .register(StarshipFireRcs)
         .register(StarshipSafeMode)
-        .register(StarshipReset)
+        .register(StarshipReset);
+
+    // Add Isaac Sim timeline / diagnostics / USD tools when an Isaac Sim
+    // instance is reachable.  Set ISAAC_CONTROL_URL (default localhost:8282)
+    // to enable.  If the env var is absent the tools are simply omitted so
+    // the agent can still run against a standalone ROS 2 stub.
+    let isaac_url = std::env::var("ISAAC_CONTROL_URL")
+        .unwrap_or_else(|_| "http://localhost:8282".to_owned());
+
+    // Probe reachability — don't add tools if server is clearly not running.
+    // We do a quick non-blocking check rather than blocking the startup.
+    // (Actual tool calls will fail gracefully if Isaac is unavailable.)
+    let add_isaac = std::env::var("ISAAC_CONTROL_URL").is_ok()
+        || std::net::TcpStream::connect_timeout(
+            &"127.0.0.1:8282".parse().unwrap(),
+            std::time::Duration::from_millis(200),
+        ).is_ok();
+
+    if add_isaac {
+        println!("  isaac  → {isaac_url} (timeline + diagnostics + USD tools enabled)");
+        all_isaac_tools(base, IsaacClient::new(isaac_url))
+    } else {
+        println!("  isaac  → not detected at localhost:8282 (timeline tools disabled)");
+        println!("           set ISAAC_CONTROL_URL to enable or start Isaac Sim");
+        base
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -503,6 +529,16 @@ Commands OUT (write-only):
 4. On 'abort': set throttle=0, engage safe_mode, report status.
 5. After each command, re-read telemetry to confirm state transition.
 6. Report altitude, fuel, and engine state in every response.
+
+## Isaac Sim tools (if connected)
+When Isaac Sim is running, you also have access to:
+- `timeline_start` / `timeline_stop` / `timeline_pause` — control the simulation clock
+- `get_diagnostics` — check fps, sim_time, physics_dt to confirm Isaac Sim is healthy
+- `load_usd` / `list_usds` — change the active 3D scene
+
+Always call `timeline_start` at the beginning of a session if the sim is not yet running.
+Call `get_diagnostics` after `timeline_start` to confirm the sim is healthy before
+issuing any motion commands.
 
 ## Hovering logic
 To hover at altitude H: throttle ≈ (vehicle_mass × g) / max_thrust.

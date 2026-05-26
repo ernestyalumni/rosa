@@ -15,6 +15,7 @@ rosa-core    = { path = "../rosa-core" }
 rosa-llm     = { path = "../rosa-llm" }
 rosa-tools   = { path = "../rosa-tools" }
 rosa-ros2    = { path = "../rosa-ros2" }
+rosa-isaac   = { path = "../rosa-isaac" }
 tokio        = { workspace = true }
 async-trait  = { workspace = true }
 serde        = { workspace = true }
