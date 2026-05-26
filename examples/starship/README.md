@@ -7,7 +7,7 @@ Works with the full Isaac Sim stack **or** the lightweight Python telemetry stub
 
 ### 1. Start the ROS 2 container
 ```bash
-cd Monoclaw/Deployments/ROS && docker compose up -d
+cd Monoclaw/Deployments/Stacks/ROS && docker compose up -d
 ```
 
 ### 2. Copy and start the telemetry stub (in a separate terminal)
@@ -55,10 +55,10 @@ ROS_CONTAINER=rosa-ros2 cargo run --example starship -p rosa-cli
 
 ## Isaac Sim (full physics, optional)
 
-See `Monoclaw/Deployments/IsaacSim/AGENT_BRIEF.md`.  
+See `Monoclaw/Deployments/Stacks/IsaacSim/AGENT_BRIEF.md`.  
 GPU required: RTX 3070 laptop (GPU_ID=0) or RTX 3060 12 GB desktop (GPU_ID=1).
 
 ```bash
-cd Monoclaw/Deployments/IsaacSim
+cd Monoclaw/Deployments/Stacks/IsaacSim
 GPU_ID=0 docker compose up   # RTX 3070 laptop
 ```

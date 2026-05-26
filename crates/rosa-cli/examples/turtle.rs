@@ -3,7 +3,7 @@
 //! # Prerequisites
 //! 1. Start the ROS 2 container:
 //!    ```bash
-//!    cd Monoclaw/Deployments/ROS && docker compose up -d
+//!    cd Monoclaw/Deployments/Stacks/ROS && docker compose up -d
 //!    ```
 //! 2. In another terminal, start turtlesim (needs X11 forwarding):
 //!    ```bash

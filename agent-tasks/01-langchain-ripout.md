@@ -35,7 +35,7 @@ Rosa's runtime today is ~90% LangChain glue (see `src/rosa/rosa.py` lines 21–2
    - Replace top of file with a comment: `# Python packaging removed in feat/rust-rewrite. See ARCHITECTURE.md.`
    - Delete `setup.py` (`rm setup.py`).
 5. **Strip** the root `Dockerfile`:
-   - Replace it with a 1-line stub: `# Deprecated. See Monoclaw/Deployments/ROS/Dockerfile and rosa-cli's Dockerfile.` (or delete and reference Monoclaw).
+   - Replace it with a 1-line stub: `# Deprecated. See Monoclaw/Deployments/Stacks/ROS/Dockerfile and rosa-cli's Dockerfile.` (or delete and reference Monoclaw).
 6. **Strip** `demo.sh`: delete (replaced by `examples/turtle/run.sh` in task 06).
 7. **README.md**: replace the "Quick Start" Python `pip install jpl-rosa` block with a "🚧 Under Rewrite — see ORCHESTRATION.md" note. Leave the upstream credit/links intact.
 8. **Re-grep** to confirm zero hits:

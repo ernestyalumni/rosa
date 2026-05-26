@@ -14,8 +14,8 @@ Pick the lowest-numbered task whose **Blocked by** is satisfied.
 
 Out-of-repo briefs that block 06 and 07:
 
-- `../../../Monoclaw/Deployments/ROS/AGENT_BRIEF.md` — blocks 06
-- `../../../Monoclaw/Deployments/IsaacSim/AGENT_BRIEF.md` — blocks 07
+- `../../../Monoclaw/Deployments/Stacks/ROS/AGENT_BRIEF.md` — blocks 06
+- `../../../Monoclaw/Deployments/Stacks/IsaacSim/AGENT_BRIEF.md` — blocks 07
 
 ## Conventions for sub-agents
 

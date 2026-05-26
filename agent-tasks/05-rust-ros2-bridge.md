@@ -55,7 +55,7 @@ tracing = "0.1"
 ### Acceptance criteria (5a)
 
 - [ ] `cargo test -p rosa-ros2` unit tests pass (use a `MockCommand` trait so tests don't need a live ROS install).
-- [ ] Integration test (`#[ignore]` by default): with `Monoclaw/Deployments/ROS` running, `cargo test -p rosa-ros2 --test integration -- --ignored` enumerates topics and finds `/parameter_events`.
+- [ ] Integration test (`#[ignore]` by default): with `Monoclaw/Deployments/Stacks/ROS` running, `cargo test -p rosa-ros2 --test integration -- --ignored` enumerates topics and finds `/parameter_events`.
 - [ ] Each tool registered with `ToolRegistry` and shows up in `rosa tools` output (once task 06 lands).
 - [ ] Blacklist filter unit-tested with a fixture stdout containing `/docker_bridge_topic` → omitted from result.
 
@@ -77,7 +77,7 @@ Wrap the [`r2r` crate](https://github.com/sequenceplanner/r2r) (Rust ROS 2 clien
 ### Constraints
 
 - r2r requires a sourced ROS 2 install at build time. Put `r2r` behind a `ros2-native` Cargo feature so `rosa-cli` can build without ROS 2 on the host (CLI-only mode still works via 5a).
-- Provide a Dockerfile in `crates/rosa-ros2/Dockerfile` matching `Monoclaw/Deployments/ROS/Dockerfile`'s base image so the integration test environment is reproducible.
+- Provide a Dockerfile in `crates/rosa-ros2/Dockerfile` matching `Monoclaw/Deployments/Stacks/ROS/Dockerfile`'s base image so the integration test environment is reproducible.
 
 ### Acceptance criteria (5b)
 

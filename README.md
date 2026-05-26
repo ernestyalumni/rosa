@@ -55,7 +55,7 @@ This fork replaces the upstream Python + LangChain implementation with a **Rust-
 
 ```bash
 # 1. Start the ROS 2 container
-cd Monoclaw/Deployments/ROS && docker compose up -d
+cd Monoclaw/Deployments/Stacks/ROS && docker compose up -d
 
 # 2. Build and run rosa
 cd /path/to/rosa

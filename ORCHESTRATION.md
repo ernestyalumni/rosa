@@ -62,13 +62,13 @@ See `ARCHITECTURE.md` for crate layout, message contracts, and the tool trait.
 | 7 | Isaac + Starship sim        | Sim agent    | 6        | —             | ⏳ blocked on 6 |
 
 Monoclaw Docker tracks:
-- `Monoclaw/Deployments/ROS/` — ✅ done — langchain stripped, host-network DDS, Rust toolchain. Branch: `feat/ros2-deploy-strip-langchain`.
-- `Monoclaw/Deployments/IsaacSim/` — ✅ done (first pass) — Dockerfile, compose, scripts created. USD + extensions pending task 07.
+- `Monoclaw/Deployments/Stacks/ROS/` — ✅ done — langchain stripped, host-network DDS, Rust toolchain. Branch: `feat/ros2-deploy-strip-langchain`.
+- `Monoclaw/Deployments/Stacks/IsaacSim/` — ✅ done (first pass) — Dockerfile, compose, scripts created. USD + extensions pending task 07.
 
 Two parallel Docker tracks live in Monoclaw, not this repo:
 
-- `Monoclaw/Deployments/ROS/AGENT_BRIEF.md` — drop the langchain pip install, keep ROS 2 base + Rust toolchain. Blocks phase 6.
-- `Monoclaw/Deployments/IsaacSim/AGENT_BRIEF.md` — net-new. RTX 3060 12 GB confirmed adequate. Blocks phase 7.
+- `Monoclaw/Deployments/Stacks/ROS/AGENT_BRIEF.md` — drop the langchain pip install, keep ROS 2 base + Rust toolchain. Blocks phase 6.
+- `Monoclaw/Deployments/Stacks/IsaacSim/AGENT_BRIEF.md` — net-new. RTX 3060 12 GB confirmed adequate. Blocks phase 7.
 
 Per-phase briefs live in `agent-tasks/`. Each is self-contained so a fresh Codex/Claude/openclaw session can pick up cold.
 

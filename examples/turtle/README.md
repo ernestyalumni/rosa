@@ -16,7 +16,7 @@ draws a 5-point star, all layers are working:
 
 ### 1. ROS 2 container running
 ```bash
-cd /home/propdev/.openclaw/workspace/repos/Monoclaw/Deployments/ROS
+cd /home/propdev/.openclaw/workspace/repos/Monoclaw/Deployments/Stacks/ROS
 docker compose up -d
 ```
 
@@ -95,6 +95,6 @@ Once at the `>` prompt:
 
 **`ros2` not found**: Set `ROS_CONTAINER=rosa-ros2` to route via `docker exec`.
 
-**Topics not visible**: Ensure the ROS container is on `network_mode: host` (already set in Monoclaw/Deployments/ROS/docker-compose.yml).
+**Topics not visible**: Ensure the ROS container is on `network_mode: host` (already set in Monoclaw/Deployments/Stacks/ROS/docker-compose.yml).
 
 **TurtleSim window not opening**: X11 forwarding must be enabled. Run `xhost +local:docker` on the host first.

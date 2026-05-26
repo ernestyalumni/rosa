@@ -273,13 +273,13 @@ fn test_registry_as_openai_tools() {
 // `docker exec` when `ROS_CONTAINER` is set. Always run integration tests
 // with that variable:
 //
-//   cd Monoclaw/Deployments/ROS && docker compose up -d
+//   cd Monoclaw/Deployments/Stacks/ROS && docker compose up -d
 //   ROS_CONTAINER=rosa-ros2 cargo test -p rosa-ros2 -- --include-ignored
 //
 // Without ROS_CONTAINER the ShellRunner tries to exec `ros2` on the host
 // and gets "No such file or directory".
 
-/// Requires the `Monoclaw/Deployments/ROS` docker-compose stack running
+/// Requires the `Monoclaw/Deployments/Stacks/ROS` docker-compose stack running
 /// and `ROS_CONTAINER=rosa-ros2` set in the environment.
 #[tokio::test]
 #[ignore = "requires: docker compose up -d (ROS) + ROS_CONTAINER=rosa-ros2 env var"]

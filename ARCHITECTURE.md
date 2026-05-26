@@ -155,7 +155,7 @@ Two layers:
 
 Decision: ship phase 5a first so phase 6 (turtle demo) isn't blocked on r2r mastery; backfill 5b after.
 
-The container in `Monoclaw/Deployments/ROS/` provides the ROS 2 environment; `rosa-cli` connects to it via shared host-network DDS (no separate transport).
+The container in `Monoclaw/Deployments/Stacks/ROS/` provides the ROS 2 environment; `rosa-cli` connects to it via shared host-network DDS (no separate transport).
 
 ---
 

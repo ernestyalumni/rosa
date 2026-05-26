@@ -1,7 +1,7 @@
 //! rosa-starship — FSW command-and-control demo for the Starship sim.
 //!
 //! Works with either:
-//! - Full Isaac Sim stack (Monoclaw/Deployments/IsaacSim) for physics
+//! - Full Isaac Sim stack (Monoclaw/Deployments/Stacks/IsaacSim) for physics
 //! - Fallback stub (`examples/starship/stub/run_stub.sh`) for quick demos
 //!
 //! # Run

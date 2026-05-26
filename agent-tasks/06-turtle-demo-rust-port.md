@@ -1,7 +1,7 @@
 # Task 06 — Turtle Demo Port (Rust)
 
 **Owner role:** Rust + ROS agent
-**Blocked by:** 03, 04, 05 (5a is enough; 5b helps but not required), plus `Monoclaw/Deployments/ROS/AGENT_BRIEF.md`
+**Blocked by:** 03, 04, 05 (5a is enough; 5b helps but not required), plus `Monoclaw/Deployments/Stacks/ROS/AGENT_BRIEF.md`
 **Blocks:** 07
 **Estimate:** 3–5 hr
 
@@ -56,7 +56,7 @@ Load `system_prompt.md` content into the agent's system prompt at startup.
 
 ```bash
 # 1. Start ROS 2 + turtlesim container
-cd /home/propdev/.openclaw/workspace/repos/Monoclaw/Deployments/ROS
+cd /home/propdev/.openclaw/workspace/repos/Monoclaw/Deployments/Stacks/ROS
 docker compose up -d
 docker compose exec ros2 ros2 run turtlesim turtlesim_node &  # GUI via X11
 
@@ -71,7 +71,7 @@ cargo run --release --example turtle
 ## Acceptance criteria
 
 - [ ] `cargo run --example turtle` builds and starts the REPL with the turtle-specific system prompt loaded.
-- [ ] Against a running `Monoclaw/Deployments/ROS` stack with turtlesim running, the prompt `"Move turtle1 forward 2 units"` produces a visible motion.
+- [ ] Against a running `Monoclaw/Deployments/Stacks/ROS` stack with turtlesim running, the prompt `"Move turtle1 forward 2 units"` produces a visible motion.
 - [ ] The prompt `"Draw a 5-point star using the turtle"` produces a star (recorded as a screenshot in the PR).
 - [ ] Streaming output renders tokens incrementally in the terminal.
 - [ ] `Ctrl-C` mid-response cancels cleanly (matches upstream's `GracefulInterruptHandler`).

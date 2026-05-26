@@ -1,12 +1,12 @@
 # Task 07 — Starship Sim + rosa Command/Control
 
 **Owner role:** Sim agent (Isaac Sim + USD + ROS 2 bridge)
-**Blocked by:** 06 (turtle demo working), plus `Monoclaw/Deployments/IsaacSim/AGENT_BRIEF.md`
+**Blocked by:** 06 (turtle demo working), plus `Monoclaw/Deployments/Stacks/IsaacSim/AGENT_BRIEF.md`
 **Estimate:** 1–2 days (this is the stretch goal)
 
 ## Goal
 
-Inside NVIDIA Isaac Sim (running in the `Monoclaw/Deployments/IsaacSim` container), simulate a Starship-stand-in vehicle exposing ROS 2 topics for telemetry and accepting commands from rosa. The user prompts rosa-cli in natural language; rosa reasons; thrusters fire.
+Inside NVIDIA Isaac Sim (running in the `Monoclaw/Deployments/Stacks/IsaacSim` container), simulate a Starship-stand-in vehicle exposing ROS 2 topics for telemetry and accepting commands from rosa. The user prompts rosa-cli in natural language; rosa reasons; thrusters fire.
 
 ## Context — what "Starship sim" means here (MVP)
 
@@ -65,7 +65,7 @@ examples/starship/
 
 In Monoclaw (covered by its IsaacSim brief, listed here for cross-reference):
 ```
-Monoclaw/Deployments/IsaacSim/
+Monoclaw/Deployments/Stacks/IsaacSim/
 ├── starship/
 │   ├── starship.usd          # Stage with the Starship stand-in
 │   ├── starship_publisher.py # Isaac Sim extension entry: hooks physics → ROS 2 topics
@@ -101,7 +101,7 @@ This is also the **FSW design surface** to talk about in the Matter Intelligence
 
 ## Acceptance criteria
 
-- [ ] `Monoclaw/Deployments/IsaacSim` container starts with `docker compose up`; Isaac Sim window visible via X11 with the Starship stand-in on the pad.
+- [ ] `Monoclaw/Deployments/Stacks/IsaacSim` container starts with `docker compose up`; Isaac Sim window visible via X11 with the Starship stand-in on the pad.
 - [ ] `ros2 topic list` from the ROS 2 container shows the `/starship/*` topics from the contract above.
 - [ ] `cargo run --example starship` opens REPL with system prompt loaded.
 - [ ] Demo prompt "Hover the vehicle at 500 m for 10 seconds" produces a visibly hovering Starship in the Isaac Sim viewport, ±50 m altitude tolerance.
