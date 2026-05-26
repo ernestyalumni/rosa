@@ -13,6 +13,7 @@ rosa/
 │   ├── rosa-llm/         # LlmProvider trait + OpenAI/Anthropic/Ollama adapters
 │   ├── rosa-tools/       # Tool trait + ToolRegistry + JSON schema derivation
 │   ├── rosa-ros2/        # r2r/rclrs bridge: topics, services, params, CLI fallback
+│   ├── rosa-isaac/       # Isaac Sim HTTP control tools (timeline, diagnostics, USD)
 │   └── rosa-cli/         # binary `rosa`: REPL, streaming render, config loading
 ├── examples/
 │   ├── turtle/           # phase 6: turtle demo as a Rust binary
@@ -143,6 +144,31 @@ impl ToolRegistry {
 ```
 
 Convention: each ROS tool is a struct implementing `Tool`. Arg structs derive `Deserialize + JsonSchema` so `schema()` is one line. Blacklist support (matching upstream rosa) lives as a constructor arg on tools that need it.
+
+---
+
+## `rosa-isaac` — Isaac Sim control tools
+
+Calls the HTTP control API embedded inside `enable_ros2_bridge.py` (runs in the
+`isaac-sim` Docker container at port 8282, or wherever `ISAAC_CONTROL_URL` points).
+
+```rust
+// One-liner to get all Isaac tools into a registry:
+use rosa_isaac::{IsaacClient, tools::all_isaac_tools};
+let registry = all_isaac_tools(ToolRegistry::new(), IsaacClient::default());
+```
+
+| Tool             | HTTP             | Description                             |
+|------------------|------------------|-----------------------------------------|
+| `timeline_start` | `POST /timeline/play`  | Start simulation, /clock begins ticking |
+| `timeline_stop`  | `POST /timeline/stop`  | Stop + rewind to t=0                    |
+| `timeline_pause` | `POST /timeline/pause` | Freeze (keep state)                     |
+| `get_diagnostics`| `GET  /diagnostics`    | fps, sim_time, running, physics_dt      |
+| `load_usd`       | `POST /scene/load`     | Load a USD scene file                   |
+| `list_usds`      | `GET  /scene/list`     | Discover available USD scenes           |
+
+`IsaacClient` wraps `reqwest::Client` with a 30s timeout. `ISAAC_CONTROL_URL`
+env var overrides the default `http://localhost:8282`.
 
 ---
 
