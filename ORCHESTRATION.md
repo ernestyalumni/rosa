@@ -59,11 +59,38 @@ See `ARCHITECTURE.md` for crate layout, message contracts, and the tool trait.
 | 4 | Tool trait + registry       | Rust agent   | 2        | 3, 5          | ⏳ ready to start |
 | 5 | ROS 2 bridge (r2r/rclrs)    | Rust agent   | 2        | 3, 4          | ⏳ ready to start |
 | 6 | Turtle demo port (Rust)     | Rust agent   | 3,4,5    | Monoclaw-ROS  | ⏳ blocked on 3+4+5 |
-| 7 | Isaac + Starship sim        | Sim agent    | 6        | —             | ⏳ blocked on 6 |
+| 7 | Isaac + Starship sim        | Sim agent    | 6        | —             | 🔧 in progress — see below |
+
+### Step 7 sub-tasks (match → exceed Rob Royce's JPL demo)
+
+| # | Sub-task                    | Status |
+|---|-----------------------------|--------|
+| 7.1 | Isaac Sim boots, /clock publishes | 🔧 in progress — OmniGraph fix applied, boot in progress |
+| 7.2 | `rosa-isaac` crate: timeline/diagnostics/USD tools | ✅ done — `crates/rosa-isaac/`, branch `feat/rosa-isaac-crate` |
+| 7.3 | HTTP control server in Isaac Sim | ✅ done — `enable_ros2_bridge.py` port 8282 |
+| 7.4 | Camera/vision tools | ⏳ pending 7.1 |
+| 7.5 | Starship USD + physics | ⏳ pending 7.1 |
+
+### Isaac Sim HTTP control API (port 8282)
+
+`enable_ros2_bridge.py` (running inside the isaac-sim container) exposes:
+
+```
+GET  /health          — health check
+GET  /diagnostics     — {fps, sim_time, running, physics_dt}
+GET  /scene/list      — list USD scenes in /isaac-sim/exts/starship and Assets
+POST /timeline/play   — start simulation
+POST /timeline/stop   — stop + rewind to t=0
+POST /timeline/pause  — freeze (keep state)
+POST /scene/load      — body: {"path": "/...usd"}  load a USD scene
+```
+
+`rosa-isaac` tools (`crates/rosa-isaac/`) call these via `reqwest`.
+`ISAAC_CONTROL_URL` env var overrides `http://localhost:8282`.
 
 Monoclaw Docker tracks:
 - `Monoclaw/Deployments/Stacks/ROS/` — ✅ done — langchain stripped, host-network DDS, Rust toolchain. Branch: `feat/ros2-deploy-strip-langchain`.
-- `Monoclaw/Deployments/Stacks/IsaacSim/` — ✅ done (first pass) — Dockerfile, compose, scripts created. USD + extensions pending task 07.
+- `Monoclaw/Deployments/Stacks/IsaacSim/` — 🔧 in progress — Dockerfile/compose/scripts ✓; OmniGraph /clock fix + HTTP server ✓; /clock verification pending boot.
 
 Two parallel Docker tracks live in Monoclaw, not this repo:
 
