@@ -87,6 +87,63 @@ async fn ros2_exec(args: &[&str], timeout_secs: u64) -> std::result::Result<Stri
     }
 }
 
+// ---------------------------------------------------------------------------
+// Shared drawing primitive — rotate then drive, no pose read needed.
+// The caller tracks (current_x, current_y, current_theta) and passes them in.
+// Returns the new theta after driving so the caller can continue chaining.
+// ---------------------------------------------------------------------------
+
+/// Rotate in-place then drive forward from a known position to a target.
+/// Returns the heading after the drive (= direction toward target).
+async fn draw_segment_internal(
+    name: &str,
+    from_x: f64, from_y: f64, from_theta: f64,
+    to_x: f64, to_y: f64,
+    speed: f64,
+) -> std::result::Result<f64, String> {
+    use std::f64::consts::PI;
+
+    let dx = to_x - from_x;
+    let dy = to_y - from_y;
+    let distance = (dx * dx + dy * dy).sqrt();
+    if distance < 0.01 {
+        return Ok(from_theta); // already there
+    }
+
+    let target_theta = dy.atan2(dx);
+    let mut dtheta = target_theta - from_theta;
+    while dtheta >  PI { dtheta -= 2.0 * PI; }
+    while dtheta < -PI { dtheta += 2.0 * PI; }
+
+    let cmd_vel = format!("/{name}/cmd_vel");
+
+    // 1. Rotate in place
+    let rot_speed = 1.5_f64;
+    let rot_dur   = dtheta.abs() / rot_speed;
+    if rot_dur > 0.05 {
+        let rot_sign = if dtheta >= 0.0 { 1.0 } else { -1.0 };
+        let times = (rot_dur * 10.0).ceil() as u64;
+        let twist = format!("{{linear: {{x: 0.0}}, angular: {{z: {:.4}}}}}", rot_sign * rot_speed);
+        ros2_exec(
+            &["topic", "pub", "--rate", "10", "--times", &times.to_string(),
+              &cmd_vel, "geometry_msgs/msg/Twist", &twist],
+            rot_dur as u64 + 5,
+        ).await?;
+    }
+
+    // 2. Drive forward
+    let drive_dur = distance / speed;
+    let times = (drive_dur * 10.0).ceil() as u64;
+    let twist = format!("{{linear: {{x: {:.4}}}, angular: {{z: 0.0}}}}", speed);
+    ros2_exec(
+        &["topic", "pub", "--rate", "10", "--times", &times.to_string(),
+          &cmd_vel, "geometry_msgs/msg/Twist", &twist],
+        drive_dur as u64 + 10,
+    ).await?;
+
+    Ok(target_theta)
+}
+
 // ── turtle_publish_twist ──────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -548,55 +605,37 @@ impl Tool for TurtleDrawLineTo {
         .await
         .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
 
-        let (mut cx, mut cy, mut ctheta) = (0.0f64, 0.0f64, 0.0f64);
+        let (mut cx, mut cy, mut ctheta) = (f64::NAN, f64::NAN, f64::NAN);
         for line in raw.lines() {
-            if let Some(v) = line.trim().strip_prefix("x:") { cx = v.trim().parse().unwrap_or(0.0); }
-            else if let Some(v) = line.trim().strip_prefix("y:") { cy = v.trim().parse().unwrap_or(0.0); }
-            else if let Some(v) = line.trim().strip_prefix("theta:") { ctheta = v.trim().parse().unwrap_or(0.0); }
+            if let Some(v) = line.trim().strip_prefix("x:") {
+                if let Ok(n) = v.trim().parse::<f64>() { cx = n; }
+            } else if let Some(v) = line.trim().strip_prefix("y:") {
+                if let Ok(n) = v.trim().parse::<f64>() { cy = n; }
+            } else if let Some(v) = line.trim().strip_prefix("theta:") {
+                if let Ok(n) = v.trim().parse::<f64>() { ctheta = n; }
+            }
+        }
+        if cx.is_nan() || cy.is_nan() || ctheta.is_nan() {
+            return Err(RosaError::ToolExecution {
+                name: self.name().into(),
+                message: format!(
+                    "could not parse pose from topic echo output — got: {:?}",
+                    raw.lines().take(5).collect::<Vec<_>>()
+                ),
+            });
         }
 
-        // 2. Compute heading and distance
+        // 2. Rotate + drive using shared helper
         let dx = a.target_x - cx;
         let dy = a.target_y - cy;
         let distance = (dx * dx + dy * dy).sqrt();
         if distance < 0.01 {
             return Ok(json!({ "drawn": true, "distance": 0.0, "note": "already at target" }));
         }
-        let target_theta = dy.atan2(dx);
-        // Minimal angle difference (wrap to [-π, π])
-        let mut dtheta = target_theta - ctheta;
-        while dtheta > std::f64::consts::PI  { dtheta -= 2.0 * std::f64::consts::PI; }
-        while dtheta < -std::f64::consts::PI { dtheta += 2.0 * std::f64::consts::PI; }
 
-        // 3. Rotate to face target (angular_z = 1.5 rad/s)
-        let rot_speed = 1.5_f64;
-        let rot_dur = dtheta.abs() / rot_speed;
-        if rot_dur > 0.05 {
-            let rot_sign = if dtheta >= 0.0 { 1.0 } else { -1.0 };
-            let cmd_vel_topic = format!("/{}/cmd_vel", a.name);
-            let times = (rot_dur * 10.0).ceil() as u64;
-            let twist = format!("{{linear: {{x: 0.0}}, angular: {{z: {:.4}}}}}", rot_sign * rot_speed);
-            ros2_exec(
-                &["topic", "pub", "--rate", "10", "--times", &times.to_string(),
-                  &cmd_vel_topic, "geometry_msgs/msg/Twist", &twist],
-                (rot_dur as u64) + 5,
-            )
+        draw_segment_internal(&a.name, cx, cy, ctheta, a.target_x, a.target_y, a.speed)
             .await
             .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
-        }
-
-        // 4. Drive forward for distance / speed seconds
-        let drive_dur = distance / a.speed;
-        let cmd_vel_topic = format!("/{}/cmd_vel", a.name);
-        let times = (drive_dur * 10.0).ceil() as u64;
-        let twist = format!("{{linear: {{x: {:.4}}}, angular: {{z: 0.0}}}}", a.speed);
-        ros2_exec(
-            &["topic", "pub", "--rate", "10", "--times", &times.to_string(),
-              &cmd_vel_topic, "geometry_msgs/msg/Twist", &twist],
-            (drive_dur as u64) + 10,
-        )
-        .await
-        .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
 
         Ok(json!({
             "drawn": true,
@@ -668,6 +707,286 @@ impl Tool for TurtleDrawCircle {
     }
 }
 
+// ── turtle_draw_star ─────────────────────────────────────────────────────
+// High-level tool: computes all 5 vertices in Rust (guaranteed correct),
+// teleports to the first vertex, sets pen colour, then draws 5 segments.
+// The LLM only needs to supply the center and a safe outer radius.
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct DrawStarArgs {
+    #[serde(default = "default_turtle")]
+    pub name: String,
+    /// X coordinate of the star center (canvas space).
+    pub center_x: f64,
+    /// Y coordinate of the star center (canvas space).
+    pub center_y: f64,
+    /// Outer radius — distance from center to each point tip.
+    /// Must be ≤ min(cx, 11.1-cx, cy, 11.1-cy) to stay in bounds.
+    pub outer_radius: f64,
+    /// Pen red (0-255, default 255)
+    #[serde(default = "default_255")]
+    pub r: u8,
+    /// Pen green (0-255, default 255)
+    #[serde(default = "default_255")]
+    pub g: u8,
+    /// Pen blue (0-255, default 0)
+    #[serde(default)]
+    pub b: u8,
+    /// Pen width (default 2)
+    #[serde(default = "pen_default_width")]
+    pub width: u8,
+    /// Speed (units/s, default 2.0)
+    #[serde(default = "default_speed")]
+    pub speed: f64,
+}
+fn default_255() -> u8 { 255 }
+
+struct TurtleDrawStar;
+
+#[async_trait]
+impl Tool for TurtleDrawStar {
+    fn name(&self) -> &str { "turtle_draw_star" }
+    fn description(&self) -> &str {
+        "Draw a 5-point star centred at (center_x, center_y) with the given outer_radius. \
+         Computes all vertices internally — no manual trigonometry needed. \
+         Choose outer_radius ≤ min(cx, 11.1-cx, cy, 11.1-cy) to stay in bounds. \
+         Sets pen colour (r, g, b) and draws the star in one call."
+    }
+    fn schema(&self) -> RootSchema { schema_for!(DrawStarArgs) }
+
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: DrawStarArgs = serde_json::from_value(args)?;
+        if a.outer_radius <= 0.0 {
+            return Err(RosaError::ToolExecution {
+                name: self.name().into(),
+                message: "outer_radius must be > 0".into(),
+            });
+        }
+        if a.speed <= 0.0 {
+            return Err(RosaError::ToolExecution {
+                name: self.name().into(),
+                message: "speed must be > 0".into(),
+            });
+        }
+
+        // Compute the 5 outer vertices: 90° + k×72°, k = 0..4
+        use std::f64::consts::PI;
+        const MAX: f64 = 11.1;
+        let vertices: Vec<(f64, f64)> = (0..5usize).map(|k| {
+            let angle = PI / 2.0 + k as f64 * 2.0 * PI / 5.0;
+            let x = a.center_x + a.outer_radius * angle.cos();
+            let y = a.center_y + a.outer_radius * angle.sin();
+            (x, y)
+        }).collect();
+
+        // Validate all vertices
+        for (i, &(vx, vy)) in vertices.iter().enumerate() {
+            if vx < 0.0 || vx > MAX || vy < 0.0 || vy > MAX {
+                return Err(RosaError::ToolExecution {
+                    name: self.name().into(),
+                    message: format!(
+                        "vertex v{i} ({vx:.2}, {vy:.2}) is out of bounds [0, {MAX}] — \
+                         reduce outer_radius or move center"
+                    ),
+                });
+            }
+        }
+
+        // Star path: skip-one order 0 → 2 → 4 → 1 → 3 → 0
+        let order = [0usize, 2, 4, 1, 3, 0];
+        let path: Vec<(f64, f64)> = order.iter().map(|&i| vertices[i]).collect();
+
+        let (x0, y0) = path[0];
+        let (x1, y1) = path[1];
+        // Teleport to start facing the first target so drive_segment starts aligned
+        let initial_theta = (y1 - y0).atan2(x1 - x0);
+
+        // Set pen UP then teleport
+        let svc = format!("/{}/set_pen", a.name);
+        let params = format!(
+            "{{r: {}, g: {}, b: {}, width: {}, \"off\": 1}}",
+            a.r, a.g, a.b, a.width
+        );
+        ros2_exec(&["service", "call", &svc, "turtlesim/srv/SetPen", &params], 5)
+            .await
+            .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
+
+        let svc = format!("/{}/teleport_absolute", a.name);
+        let params = format!("{{x: {:.4}, y: {:.4}, theta: {:.4}}}", x0, y0, initial_theta);
+        ros2_exec(&["service", "call", &svc, "turtlesim/srv/TeleportAbsolute", &params], 5)
+            .await
+            .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
+
+        // Set pen DOWN with colour
+        let svc = format!("/{}/set_pen", a.name);
+        let params = format!(
+            "{{r: {}, g: {}, b: {}, width: {}, \"off\": 0}}",
+            a.r, a.g, a.b, a.width
+        );
+        ros2_exec(&["service", "call", &svc, "turtlesim/srv/SetPen", &params], 5)
+            .await
+            .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
+
+        // Draw all 5 segments, tracking position and heading in Rust
+        let mut cur_x = x0;
+        let mut cur_y = y0;
+        let mut cur_theta = initial_theta;
+
+        for i in 1..path.len() {
+            let (tx, ty) = path[i];
+            cur_theta = draw_segment_internal(&a.name, cur_x, cur_y, cur_theta, tx, ty, a.speed)
+                .await
+                .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
+            cur_x = tx;
+            cur_y = ty;
+        }
+
+        Ok(json!({
+            "drawn": true,
+            "center": { "x": a.center_x, "y": a.center_y },
+            "outer_radius": a.outer_radius,
+            "vertices": vertices.iter().enumerate()
+                .map(|(i, (x, y))| json!({"k": i, "x": x, "y": y}))
+                .collect::<Vec<_>>(),
+        }))
+    }
+}
+
+// ── turtle_draw_polyline ──────────────────────────────────────────────────
+// General multi-point drawing tool matching Python's draw_polyline.
+// The LLM provides the list of (x,y) points; this tool draws them in order.
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct DrawPolylineArgs {
+    #[serde(default = "default_turtle")]
+    pub name: String,
+    /// List of [x, y] points to connect with straight lines.
+    pub points: Vec<[f64; 2]>,
+    /// If true, adds a final segment back to the first point (closes the shape).
+    #[serde(default)]
+    pub closed: bool,
+    /// Pen red (0-255, default 255)
+    #[serde(default = "default_255")]
+    pub r: u8,
+    /// Pen green (0-255, default 255)
+    #[serde(default = "default_255")]
+    pub g: u8,
+    /// Pen blue (0-255, default 0)
+    #[serde(default)]
+    pub b: u8,
+    /// Pen width (default 2)
+    #[serde(default = "pen_default_width")]
+    pub width: u8,
+    /// Speed (units/s, default 2.0)
+    #[serde(default = "default_speed")]
+    pub speed: f64,
+}
+
+struct TurtleDrawPolyline;
+
+#[async_trait]
+impl Tool for TurtleDrawPolyline {
+    fn name(&self) -> &str { "turtle_draw_polyline" }
+    fn description(&self) -> &str {
+        "Draw a series of straight line segments through the given list of [x, y] points. \
+         Validates all points are in bounds, lifts the pen to teleport to the first point, \
+         then draws sequentially. Set closed=true to connect the last point back to the first. \
+         Use this for polygons, stars, or any multi-point path — provide coordinates \
+         computed from math tools (cos, sin, degrees_to_radians)."
+    }
+    fn schema(&self) -> RootSchema { schema_for!(DrawPolylineArgs) }
+
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: DrawPolylineArgs = serde_json::from_value(args)?;
+        if a.points.len() < 2 {
+            return Err(RosaError::ToolExecution {
+                name: self.name().into(),
+                message: "need at least 2 points".into(),
+            });
+        }
+        if a.speed <= 0.0 {
+            return Err(RosaError::ToolExecution {
+                name: self.name().into(),
+                message: "speed must be > 0".into(),
+            });
+        }
+
+        const MAX: f64 = 11.1;
+        for (i, p) in a.points.iter().enumerate() {
+            if p[0] < 0.0 || p[0] > MAX || p[1] < 0.0 || p[1] > MAX {
+                return Err(RosaError::ToolExecution {
+                    name: self.name().into(),
+                    message: format!(
+                        "point[{i}] ({:.2}, {:.2}) is out of bounds [0, {MAX}]",
+                        p[0], p[1]
+                    ),
+                });
+            }
+        }
+
+        // Build the full path (optionally closed)
+        let mut path: Vec<[f64; 2]> = a.points.clone();
+        if a.closed {
+            path.push(a.points[0]);
+        }
+
+        let x0 = path[0][0];
+        let y0 = path[0][1];
+        let x1 = path[1][0];
+        let y1 = path[1][1];
+        let initial_theta = (y1 - y0).atan2(x1 - x0);
+
+        // Pen up, teleport to first point
+        let svc = format!("/{}/set_pen", a.name);
+        let params = format!(
+            "{{r: {}, g: {}, b: {}, width: {}, \"off\": 1}}",
+            a.r, a.g, a.b, a.width
+        );
+        ros2_exec(&["service", "call", &svc, "turtlesim/srv/SetPen", &params], 5)
+            .await
+            .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
+
+        let svc = format!("/{}/teleport_absolute", a.name);
+        let params = format!("{{x: {:.4}, y: {:.4}, theta: {:.4}}}", x0, y0, initial_theta);
+        ros2_exec(&["service", "call", &svc, "turtlesim/srv/TeleportAbsolute", &params], 5)
+            .await
+            .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
+
+        // Pen down with colour
+        let svc = format!("/{}/set_pen", a.name);
+        let params = format!(
+            "{{r: {}, g: {}, b: {}, width: {}, \"off\": 0}}",
+            a.r, a.g, a.b, a.width
+        );
+        ros2_exec(&["service", "call", &svc, "turtlesim/srv/SetPen", &params], 5)
+            .await
+            .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
+
+        // Draw segments
+        let mut cur_x = x0;
+        let mut cur_y = y0;
+        let mut cur_theta = initial_theta;
+        let mut segments = 0usize;
+
+        for p in &path[1..] {
+            let (tx, ty) = (p[0], p[1]);
+            cur_theta = draw_segment_internal(&a.name, cur_x, cur_y, cur_theta, tx, ty, a.speed)
+                .await
+                .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
+            cur_x = tx;
+            cur_y = ty;
+            segments += 1;
+        }
+
+        Ok(json!({
+            "drawn": true,
+            "segments": segments,
+            "closed": a.closed,
+            "points": a.points.len(),
+        }))
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Build the full turtle registry
 // ---------------------------------------------------------------------------
@@ -687,6 +1006,8 @@ fn turtle_registry() -> ToolRegistry {
         .register(TurtleTeleportRelative)
         .register(TurtleDrawLineTo)
         .register(TurtleDrawCircle)
+        .register(TurtleDrawStar)
+        .register(TurtleDrawPolyline)
 }
 
 // ---------------------------------------------------------------------------
@@ -841,44 +1162,71 @@ You are rosa, a robot operator controlling a TurtleSim in ROS 2.
 - `linear_x > 0` → move forward; `angular_z > 0` → turn counterclockwise
 
 ## Available Tools
-| Tool                       | Purpose                                           |
-|----------------------------|---------------------------------------------------|
-| `turtle_publish_twist`     | Move/rotate for N seconds                        |
-| `turtle_get_pose`          | Read current (x, y, theta)                       |
-| `turtle_teleport_absolute` | Jump to (x, y, theta) without drawing            |
-| `turtle_teleport_relative` | Relative rotate + forward jump without drawing   |
-| `turtle_set_pen`           | Set pen colour (r,g,b), width, on/off            |
-| `turtle_clear`             | Clear drawings (keeps turtles)                   |
-| `turtle_reset`             | Full reset: remove extra turtles, clear canvas   |
-| `turtle_stop`              | Send zero-velocity to stop immediately           |
-| `turtle_spawn`             | Spawn a new turtle at (x, y, theta)              |
-| `turtle_kill`              | Remove a turtle by name                          |
-| `turtle_draw_line_to`      | Draw line from current pose to (target_x, target_y)|
-| `turtle_draw_circle`       | Draw circle of given radius at current position  |
-| `turtle_within_bounds`     | Check if (x, y) is inside the canvas            |
 
-Plus all ROS 2 inspection tools: `ros2_list_nodes`, `ros2_list_topics`, `ros2_service_call`, etc.
+### High-level drawing (use these first — they handle pen, teleport, and sequencing):
+| Tool                    | Purpose                                                              |
+|-------------------------|----------------------------------------------------------------------|
+| `turtle_draw_star`      | **5-point star**: give center (cx,cy) + outer_radius + colour. Done.|
+| `turtle_draw_polyline`  | Multi-point path: give list of [x,y] points + colour. Done.        |
+| `turtle_draw_circle`    | Circle at current position, given radius + colour.                  |
+| `turtle_draw_line_to`   | Single segment from current pose to (target_x, target_y).          |
 
-## Drawing Strategy
+### Motion / positioning:
+| Tool                       | Purpose                                                   |
+|----------------------------|-----------------------------------------------------------|
+| `turtle_get_pose`          | Read current (x, y, theta)                               |
+| `turtle_teleport_absolute` | Jump to (x, y, theta) without drawing                    |
+| `turtle_teleport_relative` | Relative rotate + forward jump without drawing           |
+| `turtle_publish_twist`     | Move/rotate for N seconds (low-level, use sparingly)     |
+| `turtle_stop`              | Send zero-velocity                                        |
 
-**Straight lines:** use `turtle_draw_line_to` — it auto-rotates and drives.
+### Canvas / lifecycle:
+| Tool                | Purpose                                                          |
+|---------------------|------------------------------------------------------------------|
+| `turtle_set_pen`    | Set pen colour (r,g,b), width, on/off                           |
+| `turtle_clear`      | Clear drawings (keeps turtles)                                   |
+| `turtle_reset`      | Full reset: remove extra turtles, clear canvas                   |
+| `turtle_within_bounds` | Check if (x, y) is inside the canvas                        |
+| `turtle_spawn`      | Spawn a new turtle at (x, y, theta)                             |
+| `turtle_kill`       | Remove a turtle by name                                          |
 
-**Circles:** use `turtle_draw_circle` — it computes angular velocity from v/r.
+Plus math tools: `degrees_to_radians`, `cos`, `sin`, `atan2`, `sqrt`, `distance_2d`, etc.
+Plus ROS 2 tools: `ros2_list_nodes`, `ros2_list_topics`, `ros2_service_call`, etc.
 
-**Polygons (star, square, triangle):**
-1. `turtle_teleport_absolute` to start corner (pen up first with `turtle_set_pen off=1`)
-2. `turtle_set_pen off=0` to put pen down, choose colour
-3. Loop N sides: `turtle_publish_twist` (forward) → `turtle_publish_twist` (turn)
-   - Turn angle for N-gon: 360°/N exterior angle
-   - 5-point star turn: 144° = 2.5133 rad
-4. `turtle_stop` to ensure motion has ceased
+## Drawing Rules
 
-**Multi-turtle:** spawn with `turtle_spawn`, address each by `name`.
+### Canvas and safe sizing
+- Canvas is **11.1 × 11.1**, origin at bottom-left.
+- Default spawn: (5.54, 5.54). A turtle can go out of bounds — always size shapes to fit.
+- Before drawing: call `turtle_get_pose`, then compute
+  `R_safe = min(cx, 11.1−cx, cy, 11.1−cy) × 0.85`
+  to find the largest safe radius for centred shapes.
+
+### 5-point star → use `turtle_draw_star`
+  Just call `turtle_draw_star(center_x, center_y, outer_radius, r, g, b)`.
+  The tool computes all vertices internally and validates bounds.
+  Choose `outer_radius ≤ R_safe`.
+  Example from center: `turtle_draw_star(center_x=5.54, center_y=5.54, outer_radius=3.5, r=255, g=255, b=0)`
+
+### Any polygon (square, triangle, hexagon, custom star) → use `turtle_draw_polyline`
+  1. Compute vertex coordinates using math tools.
+     - N-gon vertex k: angle_rad = `degrees_to_radians(start_angle + k×(360/N))`
+                       x = cx + R×`cos(angle_rad)`,  y = cy + R×`sin(angle_rad)`
+  2. Validate each vertex with `turtle_within_bounds`.
+  3. Call `turtle_draw_polyline(points=[[x0,y0],[x1,y1],...], closed=True, r, g, b)`.
+
+### Circle → use `turtle_draw_circle`
+  Radius must be ≤ R_safe. The tool draws from the current position.
+
+### Single line → use `turtle_draw_line_to`
+  Pen must already be down. The tool reads current pose and draws to the target.
+
+### Low-level motion → `turtle_publish_twist`
+  Use only when the high-level drawing tools don't fit the task.
+  All tool calls execute sequentially — each finishes before the next starts.
 
 ## Important Rules
-- Never compute trig yourself — use `atan2`, `sin`, `cos`, `degrees_to_radians`, etc.
-- Always verify bounds with `turtle_within_bounds` before large moves.
-- After `turtle_publish_twist`, the tool auto-sends a stop — no need to call `turtle_stop` again
-  unless you need an explicit halt mid-sequence.
-- For precise shapes: time = distance / speed or time = angle / angular_rate.
+- **Always call `turtle_get_pose` first** when sizing a shape — you must know where you are.
+- Use math tools for trig (`degrees_to_radians`, `cos`, `sin`, `atan2`) — never guess radian values.
+- Prefer `turtle_draw_star` and `turtle_draw_polyline` over manual multi-step sequences.
 ";

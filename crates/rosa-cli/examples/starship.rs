@@ -39,14 +39,21 @@ use rosa_ros2::ros2_registry_default;
 // Shared ros2 helper (same as turtle.rs)
 // ---------------------------------------------------------------------------
 
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
 async fn ros2_exec(args: &[&str], timeout_secs: u64) -> std::result::Result<String, String> {
     let ros_container = std::env::var("ROS_CONTAINER").ok();
-    let owned_cmd: String; // kept alive for the duration of the call
+    let owned_cmd: String;
     let (program, full_args): (&str, Vec<&str>) = if let Some(ref c) = ros_container {
-        owned_cmd = format!("ros2 {}", args.join(" "));
+        owned_cmd = format!(
+            "ros2 {}",
+            args.iter().map(|a| shell_quote(a)).collect::<Vec<_>>().join(" ")
+        );
         ("docker", vec!["exec", c.as_str(), "bash", "-ic", owned_cmd.as_str()])
     } else {
-        owned_cmd = String::new(); // unused in direct mode, kept for lifetime
+        owned_cmd = String::new();
         let _ = &owned_cmd;
         ("ros2", args.to_vec())
     };

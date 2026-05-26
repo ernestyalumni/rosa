@@ -165,40 +165,32 @@ impl Agent {
                     tool_calls: tool_calls.clone(),
                 });
 
-                // Dispatch all tool calls (fan-out, bounded by tokio::task::JoinSet)
-                let mut join_set = tokio::task::JoinSet::new();
+                // Dispatch tool calls sequentially — critical for robot control where
+                // concurrent actuator commands (e.g. cmd_vel) interfere with each other.
                 for tc in tool_calls {
-                    let tools = Arc::clone(&self.tools);
-                    let tx_clone = tx.clone();
-                    join_set.spawn(async move {
-                        let _ = tx_clone.send(AgentEvent::ToolStart {
-                            name: tc.name.clone(),
-                            input: tc.arguments.clone(),
-                        });
-                        let result = tools.dispatch(&tc.name, tc.arguments.clone()).await;
-                        (tc.id, tc.name, result)
+                    let _ = tx.send(AgentEvent::ToolStart {
+                        name: tc.name.clone(),
+                        input: tc.arguments.clone(),
                     });
-                }
-
-                while let Some(Ok((call_id, tool_name, result))) = join_set.join_next().await {
+                    let result = self.tools.dispatch(&tc.name, tc.arguments.clone()).await;
                     let output = match result {
                         Ok(val) => {
                             let _ = tx.send(AgentEvent::ToolEnd {
-                                name: tool_name.clone(),
+                                name: tc.name.clone(),
                                 output: val.clone(),
                             });
                             val.to_string()
                         }
                         Err(e) => {
-                            warn!(tool = %tool_name, error = %e, "tool error");
+                            warn!(tool = %tc.name, error = %e, "tool error");
                             let _ = tx.send(AgentEvent::ToolEnd {
-                                name: tool_name.clone(),
+                                name: tc.name.clone(),
                                 output: serde_json::json!({ "error": e.to_string() }),
                             });
                             format!("{{\"error\": \"{e}\"}}")
                         }
                     };
-                    history.push(Message::Tool { call_id, content: output });
+                    history.push(Message::Tool { call_id: tc.id, content: output });
                 }
 
                 continue; // next iteration
