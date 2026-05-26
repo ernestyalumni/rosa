@@ -47,12 +47,16 @@ from std_msgs.msg import Bool, Float32, Float64, String
 from std_srvs.srv import Empty
 
 # ── Physics constants ─────────────────────────────────────────────────────
+# Calibrated so hover throttle ≈ 0.45–0.55 depending on propellant load,
+# matching the FSW system-prompt spec (0.0 = empty, 1.0 = full tank).
+#   Full-fuel (830 t total) hover throttle: 830k×9.81/14.7M ≈ 0.554
+#   Half-fuel (480 t total) hover throttle: 480k×9.81/14.7M ≈ 0.321
 G            = 9.81          # m/s²
-DRY_MASS     = 130_000.0     # kg
-MAX_THRUST   = 14_700_000.0  # N  (6x Raptor, simplified)
+DRY_MASS     = 130_000.0     # kg  (upper-stage dry mass)
+MAX_THRUST   = 14_700_000.0  # N   (6× Raptor Vacuum, simplified)
 MAX_THROTTLE = 0.85
-FUEL_CAP     = 1_200_000.0   # kg (propellant, simplified)
-BURN_RATE    = 2_000.0       # kg/s at 100% throttle
+FUEL_CAP     = 700_000.0     # kg  (propellant; gives ≈55% hover at full tank)
+BURN_RATE    = 2_000.0       # kg/s at 100% throttle (≈6 min burn to empty)
 MOMENT_I     = 5e9           # kg·m²  (roll/pitch)
 RCS_TORQUE   = 5e6           # N·m per unit impulse
 
