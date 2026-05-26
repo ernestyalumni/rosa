@@ -1,4 +1,4 @@
-//! USD scene tools: load_usd, list_usds.
+//! USD scene tools: load_usd, list_usds, create_starship_stage, starship_stage_status.
 
 use async_trait::async_trait;
 use schemars::{schema_for, schema::RootSchema, JsonSchema};
@@ -107,6 +107,103 @@ impl Tool for ListUsdsTool {
     async fn execute(&self, _args: Value) -> Result<Value> {
         self.client
             .get("/scene/list")
+            .await
+            .map_err(|e| RosaError::Other(e.to_string()))
+    }
+}
+
+// ── CreateStarshipStageTool ────────────────────────────────────────────────────
+
+/// Arguments for `create_starship_stage` — none required.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CreateStarshipStageArgs {}
+
+/// Generate the Starship USD stage (`/isaac-sim/exts/starship/starship.usd`).
+///
+/// The stage contains a capsule rigid body representing the Starship vehicle,
+/// a ground collision plane, and a camera at the nose cone.  This only needs
+/// to be called ONCE; after that, use `load_usd` with the stage path.
+///
+/// USD generation runs inside the Isaac Sim process (pxr bindings require
+/// the Kit runtime).  Poll `starship_stage_status` to confirm completion.
+pub struct CreateStarshipStageTool {
+    client: IsaacClient,
+}
+
+impl CreateStarshipStageTool {
+    pub fn new(client: IsaacClient) -> Self {
+        Self { client }
+    }
+}
+
+#[async_trait]
+impl Tool for CreateStarshipStageTool {
+    fn name(&self) -> &str {
+        "create_starship_stage"
+    }
+
+    fn description(&self) -> &str {
+        "Generate the Starship USD stage inside Isaac Sim.  \
+         Creates `/isaac-sim/exts/starship/starship.usd` with a capsule \
+         rigid body, ground plane, physics scene, and nose-cone camera.  \
+         Only needed once; after that load the stage with `load_usd`.  \
+         Poll `starship_stage_status` after ~5s to confirm the file exists."
+    }
+
+    fn schema(&self) -> RootSchema {
+        schema_for!(CreateStarshipStageArgs)
+    }
+
+    async fn execute(&self, _args: Value) -> Result<Value> {
+        self.client
+            .post("/starship/create-stage", None)
+            .await
+            .map_err(|e| RosaError::Other(e.to_string()))?;
+
+        Ok(json!({
+            "status": "queued",
+            "output_path": "/isaac-sim/exts/starship/starship.usd",
+            "note": "stage creation is asynchronous — call starship_stage_status after 5s"
+        }))
+    }
+}
+
+// ── StarshipStageStatusTool ────────────────────────────────────────────────────
+
+/// Arguments for `starship_stage_status` — none required.
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct StarshipStageStatusArgs {}
+
+/// Check whether the Starship USD stage file has been created.
+pub struct StarshipStageStatusTool {
+    client: IsaacClient,
+}
+
+impl StarshipStageStatusTool {
+    pub fn new(client: IsaacClient) -> Self {
+        Self { client }
+    }
+}
+
+#[async_trait]
+impl Tool for StarshipStageStatusTool {
+    fn name(&self) -> &str {
+        "starship_stage_status"
+    }
+
+    fn description(&self) -> &str {
+        "Check whether `/isaac-sim/exts/starship/starship.usd` exists.  \
+         Returns `exists: true` and `size_bytes` when the stage is ready.  \
+         Use this after `create_starship_stage` before calling `load_usd`."
+    }
+
+    fn schema(&self) -> RootSchema {
+        schema_for!(StarshipStageStatusArgs)
+    }
+
+    async fn execute(&self, _args: Value) -> Result<Value> {
+        self.client
+            .get("/starship/stage-status")
             .await
             .map_err(|e| RosaError::Other(e.to_string()))
     }

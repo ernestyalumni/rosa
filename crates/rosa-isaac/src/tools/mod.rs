@@ -5,7 +5,7 @@ mod scene;
 mod timeline;
 
 pub use diagnostics::GetDiagnosticsTool;
-pub use scene::{ListUsdsTool, LoadUsdTool};
+pub use scene::{CreateStarshipStageTool, ListUsdsTool, LoadUsdTool, StarshipStageStatusTool};
 pub use timeline::{TimelinePauseTool, TimelineStartTool, TimelineStopTool};
 
 use rosa_tools::ToolRegistry;
@@ -27,5 +27,7 @@ pub fn all_isaac_tools(registry: ToolRegistry, client: IsaacClient) -> ToolRegis
         .register(TimelinePauseTool::new(client.clone()))
         .register(GetDiagnosticsTool::new(client.clone()))
         .register(LoadUsdTool::new(client.clone()))
-        .register(ListUsdsTool::new(client))
+        .register(ListUsdsTool::new(client.clone()))
+        .register(CreateStarshipStageTool::new(client.clone()))
+        .register(StarshipStageStatusTool::new(client))
 }
