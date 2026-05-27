@@ -1,12 +1,4 @@
-//! Turtle demo — rosa (Rust) controlling TurtleSim via ROS 2.
-//!
-//! End-to-end sanity-check for the entire rosa Rust rewrite. If the turtle draws a
-//! 5-point star, all layers are working:
-//! - `rosa-core`  — agent loop (LLM streaming + tool fan-out)
-//! - `rosa-llm`   — Anthropic/OpenAI/xAI adapters (SSE + tool_use parsing)
-//! - `rosa-tools` — ToolRegistry dispatch
-//! - `rosa-ros2`  — CLI shell-out tools (ros2 node/topic/service wrappers)
-//! - `rosa-cli`   — turtle-specific tools (Twist publish, pose read, services)
+//! Turtle demo — rosa controlling TurtleSim via ROS 2.
 //!
 //! # Prerequisites
 //! 1. Start the ROS 2 container:
@@ -15,7 +7,6 @@
 //!    ```
 //! 2. In another terminal, start turtlesim (needs X11 forwarding):
 //!    ```bash
-//!    xhost +local:docker   # grant Docker X11 access (host, once per session)
 //!    docker compose exec ros2 bash -ic "ros2 run turtlesim turtlesim_node"
 //!    ```
 //! 3. Set `ROS_CONTAINER=rosa-ros2` so rosa uses `docker exec` for all ros2 commands.
@@ -25,31 +16,7 @@
 //! ROS_CONTAINER=rosa-ros2 ANTHROPIC_API_KEY=... \
 //!   cargo run --example turtle -p rosa-cli
 //! ```
-//!
-//! # Demo prompts
-//! ```text
-//! > What ROS 2 topics are available?
-//! > Move turtle1 forward 3 units.
-//! > Draw a 5-point star using the turtle.
-//! > Set the pen to red (r=255, g=0, b=0) and draw a circle.
-//! > Draw a triangle with side length 3.
-//! > Reset the sim and draw a red square.
-//! ```
-//!
-//! # TurtleSim coordinate reference
-//! - Canvas: 11.1 × 11.1 units; origin (0, 0) at **bottom-left**
-//! - Default spawn: (5.54, 5.54), theta = 0 (facing right / +x)
-//! - theta = π/2 → facing up (+y); `angular_z > 0` → counterclockwise
-//!
-//! # 5-point star geometry
-//! Skip-one vertex order (v0→v2→v4→v1→v3→v0); outer radius R:
-//! - Segment length = 2R × sin(72°) ≈ 1.902R
-//! - Each turn = **144°** (2.5133 rad); 5 × 144° = 720° → heading returns to start
-//!
-//! # Troubleshooting
-//! - **`ros2` not found**: set `ROS_CONTAINER=rosa-ros2` to route via `docker exec`
-//! - **Topics not visible**: ROS container must use `network_mode: host` (already set)
-//! - **TurtleSim window missing**: run `xhost +local:docker` on the host first
+//! Then try: `Draw a 5-point star using the turtle.`
 
 use std::io::{self, Write};
 use std::sync::Arc;
