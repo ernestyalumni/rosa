@@ -12,8 +12,12 @@ use crate::{filter::filter_lines, runner::{SharedRunner, ShellRunner}};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ListParamsArgs {
-    /// Restrict listing to a specific node name (e.g. `/turtlesim`). Lists all nodes when omitted.
+    /// Restrict listing to a specific node (e.g. `/turtlesim`). Lists all nodes when omitted.
     pub node: Option<String>,
+
+    /// Optional regex pattern; only parameter names matching it are returned.
+    /// Example: `"background_.*"` to see only colour parameters on `/turtlesim`.
+    pub pattern: Option<String>,
 }
 
 pub struct ListParamsTool {
@@ -37,7 +41,9 @@ impl Tool for ListParamsTool {
     fn name(&self) -> &str { "ros2_list_params" }
 
     fn description(&self) -> &str {
-        "List ROS 2 parameters. Optionally restrict to a specific `node` name."
+        "List ROS 2 parameters. Optionally restrict to a specific `node` name \
+         and/or filter parameter names with a regex `pattern` \
+         (e.g. `\"background_.*\"` to see only colour parameters on /turtlesim)."
     }
 
     fn schema(&self) -> RootSchema { schema_for!(ListParamsArgs) }
@@ -52,7 +58,7 @@ impl Tool for ListParamsTool {
         };
 
         let raw = self.runner.run(&cmd).await?;
-        let params = filter_lines(&raw, &self.blacklist, None);
+        let params = filter_lines(&raw, &self.blacklist, a.pattern.as_deref());
         Ok(json!({ "params": params }))
     }
 }

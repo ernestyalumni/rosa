@@ -13,7 +13,7 @@ use crate::{
     filter::filter_lines,
     runner::MockRunner,
     tools::{
-        DoctorTool, ListNodesTool, ListServicesTool, ListTopicsTool,
+        DoctorTool, ListNodesTool, ListParamsTool, ListServicesTool, ListTopicsTool,
         ParamSetTool, ServiceCallTool, ServiceInfoTool, TopicEchoTool,
     },
     ros2_registry_default,
@@ -110,15 +110,113 @@ async fn test_list_services_parses_correctly() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn test_topic_echo_returns_message() {
+async fn test_topic_echo_returns_message_with_explicit_type() {
     let yaml = "x: 5.54\ny: 5.54\ntheta: 0.0\n";
     let runner = MockRunner::new(yaml);
     let tool = TopicEchoTool::with_runner(runner, vec![]);
+    // msg_type is now optional — but explicit supply still works
     let result = tool
         .execute(json!({"topic": "/turtle1/pose", "msg_type": "turtlesim/msg/Pose"}))
         .await
         .unwrap();
     assert!(result["message"].as_str().unwrap().contains("x: 5.54"));
+    assert_eq!(result["count"], json!(1));
+}
+
+#[tokio::test]
+async fn test_topic_echo_works_without_msg_type() {
+    // msg_type omitted — ROS 2 discovers it; our tool should not require it
+    let yaml = "x: 1.0\ny: 2.0\ntheta: 0.5\n";
+    let runner = MockRunner::new(yaml);
+    let tool = TopicEchoTool::with_runner(runner, vec![]);
+    let result = tool
+        .execute(json!({"topic": "/turtle1/pose"}))
+        .await
+        .unwrap();
+    assert!(result["message"].as_str().unwrap().contains("x: 1.0"));
+    assert_eq!(result["count"], json!(1));
+}
+
+#[tokio::test]
+async fn test_topic_echo_count_returns_messages_array() {
+    let yaml = "data: 42\n";
+    let runner = MockRunner::new(yaml);
+    let tool = TopicEchoTool::with_runner(runner, vec![]);
+    let result = tool
+        .execute(json!({"topic": "/my_sensor", "count": 3}))
+        .await
+        .unwrap();
+    // count > 1 returns a "messages" array
+    let msgs = result["messages"].as_array().unwrap();
+    assert_eq!(msgs.len(), 3);
+    assert!(msgs[0].as_str().unwrap().contains("data: 42"));
+    assert_eq!(result["count"], json!(3));
+}
+
+#[tokio::test]
+async fn test_topic_echo_count_clamped_to_10() {
+    let runner = MockRunner::new("data: 0\n");
+    let tool = TopicEchoTool::with_runner(runner, vec![]);
+    let result = tool
+        .execute(json!({"topic": "/t", "count": 99}))
+        .await
+        .unwrap();
+    // Clamped to 10
+    assert_eq!(result["count"], json!(10));
+}
+
+// ---------------------------------------------------------------------------
+// ros2_list_params (with MockRunner)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_list_params_no_filter_returns_all() {
+    let output = "  background_r\n  background_g\n  background_b\n  use_sim_time\n";
+    let runner = MockRunner::new(output);
+    let tool = ListParamsTool::with_runner(runner, vec![]);
+    let result = tool.execute(json!({})).await.unwrap();
+    let params = result["params"].as_array().unwrap();
+    assert_eq!(params.len(), 4);
+}
+
+#[tokio::test]
+async fn test_list_params_pattern_filters_results() {
+    let output = "  background_r\n  background_g\n  background_b\n  use_sim_time\n";
+    let runner = MockRunner::new(output);
+    let tool = ListParamsTool::with_runner(runner, vec![]);
+    let result = tool
+        .execute(json!({"pattern": "background_.*"}))
+        .await
+        .unwrap();
+    let params: Vec<&str> = result["params"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(params.len(), 3);
+    assert!(params.iter().all(|p| p.starts_with("background_")));
+    assert!(!params.contains(&"use_sim_time"));
+}
+
+#[tokio::test]
+async fn test_list_params_node_and_pattern_combined() {
+    let output = "  background_r\n  background_g\n  qos_overrides\n";
+    let runner = MockRunner::new(output);
+    let tool = ListParamsTool::with_runner(runner, vec![]);
+    let result = tool
+        .execute(json!({"node": "/turtlesim", "pattern": "background_[rg]"}))
+        .await
+        .unwrap();
+    let params: Vec<&str> = result["params"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(params.len(), 2);
+    assert!(params.contains(&"background_r"));
+    assert!(params.contains(&"background_g"));
 }
 
 // ---------------------------------------------------------------------------
