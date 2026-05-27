@@ -95,6 +95,21 @@ async fn ros2_exec(args: &[&str], timeout_secs: u64) -> std::result::Result<Stri
 
 /// Rotate in-place then drive forward from a known position to a target.
 /// Returns the heading after the drive (= direction toward target).
+///
+/// ## Why teleport_relative for rotation?
+///
+/// The original nasa-jpl/rosa demo (ROS 1 + Python) uses `teleport_relative(0, angle)` for
+/// rotation — a service call that sets the turtle's heading *exactly*, with zero timing
+/// dependency.  Our previous approach used `ros2 topic pub --rate 10 --times N` with a
+/// `ceil()` rounding, which overshoots by ≈ 2.1° per turn (17 pulses × 0.15 rad = 2.55 rad
+/// for an intended 2.513 rad).  Over 5 turns that is ≈ 10.6° cumulative, which is why the
+/// star did not close.
+///
+/// `teleport_relative` does **not** draw a line even when the pen is down — only `cmd_vel`
+/// motion draws.  Using it for the rotation step eliminates all angular error.
+///
+/// For the forward drive we switch `ceil` → `round`, removing the systematic +0.5-pulse
+/// bias (≈ 0.1 units per segment at speed=2 and rate=10).
 async fn draw_segment_internal(
     name: &str,
     from_x: f64, from_y: f64, from_theta: f64,
@@ -117,26 +132,26 @@ async fn draw_segment_internal(
 
     let cmd_vel = format!("/{name}/cmd_vel");
 
-    // 1. Rotate in place
-    let rot_speed = 1.5_f64;
-    let rot_dur   = dtheta.abs() / rot_speed;
-    if rot_dur > 0.05 {
-        let rot_sign = if dtheta >= 0.0 { 1.0 } else { -1.0 };
-        let times = (rot_dur * 10.0).ceil() as u64;
-        let twist = format!("{{linear: {{x: 0.0}}, angular: {{z: {:.4}}}}}", rot_sign * rot_speed);
+    // 1. Rotate in place via teleport_relative — EXACT angle, no timing jitter, no drawing.
+    //    Matches the original Python demo's `teleport_relative(linear=0, angular=dtheta)`.
+    if dtheta.abs() > 0.001 {
+        let svc    = format!("/{name}/teleport_relative");
+        let params = format!("{{linear: 0.0, angular: {:.6}}}", dtheta);
         ros2_exec(
-            &["topic", "pub", "--rate", "10", "--times", &times.to_string(),
-              &cmd_vel, "geometry_msgs/msg/Twist", &twist],
-            rot_dur as u64 + 5,
+            &["service", "call", &svc, "turtlesim/srv/TeleportRelative", &params],
+            5,
         ).await?;
     }
 
-    // 2. Drive forward
+    // 2. Drive forward — draws the line segment.
+    //    round() instead of ceil() removes the systematic over-shoot bias.
+    //    Error is now ±½ pulse = ±(speed / rate / 2) ≈ ±0.1 units, averaging ~0 over 5 sides.
+    let rate: f64 = 10.0;
+    let times = ((distance / speed * rate).round() as u64).max(1);
     let drive_dur = distance / speed;
-    let times = (drive_dur * 10.0).ceil() as u64;
     let twist = format!("{{linear: {{x: {:.4}}}, angular: {{z: 0.0}}}}", speed);
     ros2_exec(
-        &["topic", "pub", "--rate", "10", "--times", &times.to_string(),
+        &["topic", "pub", "--rate", &format!("{}", rate as u32), "--times", &times.to_string(),
           &cmd_vel, "geometry_msgs/msg/Twist", &twist],
         drive_dur as u64 + 10,
     ).await?;
