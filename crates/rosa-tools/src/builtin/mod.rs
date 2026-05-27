@@ -1,9 +1,12 @@
 //! Provider-agnostic built-in tools bundled with rosa-tools.
 //!
+//! Provider-agnostic built-in tools bundled with rosa-tools.
+//!
 //! | Module        | Tool struct           | name                  | Purpose                        |
 //! |---------------|-----------------------|-----------------------|--------------------------------|
 //! | `calculation` | [`AddTool`]           | `add`                 | Add two floating-point numbers |
 //! | `log`         | [`LogMessageTool`]    | `log_message`         | Emit a structured log event    |
+//! | `log`         | [`ReadLogTool`]       | `read_log`            | Read + filter a log file       |
 //! | `system`      | [`SystemInfoTool`]    | `system_info`         | Query hostname / uname / date  |
 //! | `math`        | [`DegreesToRadians`]  | `degrees_to_radians`  | Convert degrees → radians      |
 //! | `math`        | [`RadiansToDegrees`]  | `radians_to_degrees`  | Convert radians → degrees      |
@@ -17,6 +20,7 @@
 //! | `math`        | [`Sin`]               | `sin`                 | sin(radians)                   |
 //! | `math`        | [`Cos`]               | `cos`                 | cos(radians)                   |
 //! | `math`        | [`Tan`]               | `tan`                 | tan(radians)                   |
+//! | `math`        | [`Mode`]              | `mode`                | Most frequent value(s)         |
 //! | `wait`        | [`WaitTool`]          | `wait`                | Pause N seconds (max 60)       |
 
 pub mod calculation;
@@ -26,7 +30,7 @@ pub mod system;
 pub mod wait;
 
 pub use calculation::AddTool;
-pub use log::LogMessageTool;
+pub use log::{LogMessageTool, ReadLogTool};
 pub use math::{
     // core navigation math (original set)
     Atan2, Cos, DegreesToRadians, Distance2D, Divide,
@@ -34,7 +38,7 @@ pub use math::{
     // additional math parity
     Acos, Asin, Atan, Cosh, Exponentiate, Modulo, Sinh, Tanh,
     AddAll, MultiplyAll,
-    Mean, Median, Variance,
+    Mean, Median, Mode, Variance,
     CountItems, CountLines, CountWords,
 };
 pub use system::SystemInfoTool;

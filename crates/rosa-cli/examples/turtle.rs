@@ -1002,6 +1002,438 @@ impl Tool for TurtleDrawPolyline {
     }
 }
 
+// ── turtle_has_moved_to ───────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct HasMovedToArgs {
+    #[serde(default = "default_turtle")]
+    pub name: String,
+    /// Expected x coordinate (canvas units).
+    pub expected_x: f64,
+    /// Expected y coordinate (canvas units).
+    pub expected_y: f64,
+    /// Acceptable Euclidean distance tolerance (default 0.1 canvas units).
+    #[serde(default = "default_tolerance")]
+    pub tolerance: f64,
+}
+fn default_tolerance() -> f64 { 0.1 }
+
+struct TurtleHasMovedTo;
+
+#[async_trait]
+impl Tool for TurtleHasMovedTo {
+    fn name(&self) -> &str { "turtle_has_moved_to" }
+    fn description(&self) -> &str {
+        "Check whether a turtle is within `tolerance` units of (expected_x, expected_y). \
+         Reads the current pose from the pose topic and returns the actual position, \
+         Euclidean distance to the target, and a boolean `at_target`. \
+         Useful for verifying a move completed successfully."
+    }
+    fn schema(&self) -> RootSchema { schema_for!(HasMovedToArgs) }
+
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: HasMovedToArgs = serde_json::from_value(args)?;
+        let topic = format!("/{}/pose", a.name);
+
+        let raw = ros2_exec(
+            &["topic", "echo", "--once", &topic, "turtlesim/msg/Pose"],
+            10,
+        )
+        .await
+        .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
+
+        let (mut x, mut y) = (f64::NAN, f64::NAN);
+        for line in raw.lines() {
+            if let Some(v) = line.trim().strip_prefix("x:") {
+                if let Ok(n) = v.trim().parse::<f64>() { x = n; }
+            } else if let Some(v) = line.trim().strip_prefix("y:") {
+                if let Ok(n) = v.trim().parse::<f64>() { y = n; }
+            }
+        }
+        if x.is_nan() || y.is_nan() {
+            return Err(RosaError::ToolExecution {
+                name: self.name().into(),
+                message: format!(
+                    "could not parse pose — got: {:?}",
+                    raw.lines().take(5).collect::<Vec<_>>()
+                ),
+            });
+        }
+
+        let dx = x - a.expected_x;
+        let dy = y - a.expected_y;
+        let distance = (dx * dx + dy * dy).sqrt();
+
+        Ok(json!({
+            "at_target": distance <= a.tolerance,
+            "turtle":    a.name,
+            "actual":    { "x": x, "y": y },
+            "expected":  { "x": a.expected_x, "y": a.expected_y },
+            "distance":  distance,
+            "tolerance": a.tolerance,
+        }))
+    }
+}
+
+// ── turtle_draw_arc ───────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct DrawArcArgs {
+    #[serde(default = "default_turtle")]
+    pub name: String,
+    /// X coordinate of the arc's center.
+    pub center_x: f64,
+    /// Y coordinate of the arc's center.
+    pub center_y: f64,
+    /// Arc radius (canvas units, > 0).
+    pub radius: f64,
+    /// Start angle in degrees, measured CCW from the +x axis.
+    pub start_angle_deg: f64,
+    /// Total arc sweep in degrees. Positive = CCW, negative = CW.
+    pub sweep_deg: f64,
+    /// Speed (units/s, default 2.0).
+    #[serde(default = "default_speed")]
+    pub speed: f64,
+    /// Pen red (0-255, default 255).
+    #[serde(default = "default_255")]
+    pub r: u8,
+    /// Pen green (0-255, default 255).
+    #[serde(default = "default_255")]
+    pub g: u8,
+    /// Pen blue (0-255, default 0).
+    #[serde(default)]
+    pub b: u8,
+    /// Pen width (default 2).
+    #[serde(default = "pen_default_width")]
+    pub width: u8,
+}
+
+struct TurtleDrawArc;
+
+#[async_trait]
+impl Tool for TurtleDrawArc {
+    fn name(&self) -> &str { "turtle_draw_arc" }
+    fn description(&self) -> &str {
+        "Draw a circular arc centred at (center_x, center_y) with the given radius. \
+         `start_angle_deg` is the starting angle from the +x axis (CCW positive, degrees). \
+         `sweep_deg` is the arc sweep (positive = CCW, negative = CW, degrees). \
+         Teleports the turtle to the arc's start point with pen up, \
+         then drives with combined linear + angular velocity to trace the arc."
+    }
+    fn schema(&self) -> RootSchema { schema_for!(DrawArcArgs) }
+
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: DrawArcArgs = serde_json::from_value(args)?;
+        if a.radius <= 0.0 {
+            return Err(RosaError::ToolExecution {
+                name: self.name().into(),
+                message: "radius must be > 0".into(),
+            });
+        }
+        if a.sweep_deg.abs() < 0.1 {
+            return Err(RosaError::ToolExecution {
+                name: self.name().into(),
+                message: "sweep_deg magnitude must be ≥ 0.1°".into(),
+            });
+        }
+
+        use std::f64::consts::PI;
+        let start_rad = a.start_angle_deg * PI / 180.0;
+        let sweep_rad = a.sweep_deg * PI / 180.0;
+
+        // Start point on the circle perimeter
+        let start_x = a.center_x + a.radius * start_rad.cos();
+        let start_y = a.center_y + a.radius * start_rad.sin();
+
+        // Tangent heading at the start: ⊥ to the radius, in the direction of travel
+        // CCW → start_angle + π/2;  CW → start_angle − π/2
+        let tangent = if sweep_rad >= 0.0 { start_rad + PI / 2.0 } else { start_rad - PI / 2.0 };
+
+        // Pen up, teleport to arc start
+        let svc = format!("/{}/set_pen", a.name);
+        let params = format!(
+            "{{r: {}, g: {}, b: {}, width: {}, \"off\": 1}}",
+            a.r, a.g, a.b, a.width
+        );
+        ros2_exec(&["service", "call", &svc, "turtlesim/srv/SetPen", &params], 5)
+            .await
+            .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
+
+        let svc = format!("/{}/teleport_absolute", a.name);
+        let params = format!("{{x: {:.4}, y: {:.4}, theta: {:.4}}}", start_x, start_y, tangent);
+        ros2_exec(&["service", "call", &svc, "turtlesim/srv/TeleportAbsolute", &params], 5)
+            .await
+            .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
+
+        // Pen down with colour
+        let svc = format!("/{}/set_pen", a.name);
+        let params = format!(
+            "{{r: {}, g: {}, b: {}, width: {}, \"off\": 0}}",
+            a.r, a.g, a.b, a.width
+        );
+        ros2_exec(&["service", "call", &svc, "turtlesim/srv/SetPen", &params], 5)
+            .await
+            .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
+
+        // ω = v / r, signed by sweep direction.  arc_time = |sweep_rad| * r / v
+        let omega        = a.speed / a.radius * sweep_rad.signum();
+        let arc_duration = sweep_rad.abs() * a.radius / a.speed;
+        let rate: f64    = 10.0;
+        let times        = ((arc_duration * rate).round() as u64).max(1);
+
+        let topic = format!("/{}/cmd_vel", a.name);
+        let twist = format!(
+            "{{linear: {{x: {:.4}}}, angular: {{z: {:.4}}}}}",
+            a.speed, omega
+        );
+        ros2_exec(
+            &["topic", "pub", "--rate", &format!("{}", rate as u32), "--times", &times.to_string(),
+              &topic, "geometry_msgs/msg/Twist", &twist],
+            arc_duration as u64 + 10,
+        )
+        .await
+        .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
+
+        Ok(json!({
+            "drawn":           true,
+            "center":          { "x": a.center_x, "y": a.center_y },
+            "radius":          a.radius,
+            "start_angle_deg": a.start_angle_deg,
+            "sweep_deg":       a.sweep_deg,
+            "arc_length":      sweep_rad.abs() * a.radius,
+        }))
+    }
+}
+
+// ── turtle_draw_rectangle ────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct DrawRectangleArgs {
+    #[serde(default = "default_turtle")]
+    pub name: String,
+    /// X coordinate of the bottom-left corner.
+    pub x: f64,
+    /// Y coordinate of the bottom-left corner.
+    pub y: f64,
+    /// Width along the +x axis (canvas units, > 0).
+    pub width: f64,
+    /// Height along the +y axis (canvas units, > 0).
+    pub height: f64,
+    /// Pen red (0-255, default 255).
+    #[serde(default = "default_255")]
+    pub r: u8,
+    /// Pen green (0-255, default 255).
+    #[serde(default = "default_255")]
+    pub g: u8,
+    /// Pen blue (0-255, default 0).
+    #[serde(default)]
+    pub b: u8,
+    /// Pen width (default 2).
+    #[serde(default = "pen_default_width")]
+    pub pen_width: u8,
+    /// Speed (units/s, default 2.0).
+    #[serde(default = "default_speed")]
+    pub speed: f64,
+}
+
+struct TurtleDrawRectangle;
+
+#[async_trait]
+impl Tool for TurtleDrawRectangle {
+    fn name(&self) -> &str { "turtle_draw_rectangle" }
+    fn description(&self) -> &str {
+        "Draw an axis-aligned rectangle with bottom-left corner at (x, y), given width and height. \
+         Lifts the pen, teleports to (x, y), sets pen colour, then draws all 4 sides and closes \
+         the shape. All corners must lie within the 11.1 × 11.1 canvas."
+    }
+    fn schema(&self) -> RootSchema { schema_for!(DrawRectangleArgs) }
+
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: DrawRectangleArgs = serde_json::from_value(args)?;
+        if a.width <= 0.0 || a.height <= 0.0 {
+            return Err(RosaError::ToolExecution {
+                name: self.name().into(),
+                message: "width and height must be > 0".into(),
+            });
+        }
+        if a.speed <= 0.0 {
+            return Err(RosaError::ToolExecution {
+                name: self.name().into(),
+                message: "speed must be > 0".into(),
+            });
+        }
+
+        const MAX: f64 = 11.1;
+        let corners = [
+            (a.x,           a.y),
+            (a.x + a.width, a.y),
+            (a.x + a.width, a.y + a.height),
+            (a.x,           a.y + a.height),
+        ];
+        for (i, &(cx, cy)) in corners.iter().enumerate() {
+            if cx < 0.0 || cx > MAX || cy < 0.0 || cy > MAX {
+                return Err(RosaError::ToolExecution {
+                    name: self.name().into(),
+                    message: format!(
+                        "corner[{i}] ({cx:.2}, {cy:.2}) is out of bounds [0, {MAX}]"
+                    ),
+                });
+            }
+        }
+
+        let (x0, y0) = corners[0];
+        let (x1, y1) = corners[1];
+        let initial_theta = (y1 - y0).atan2(x1 - x0);
+
+        // Pen up, teleport to first corner
+        let svc = format!("/{}/set_pen", a.name);
+        let params = format!(
+            "{{r: {}, g: {}, b: {}, width: {}, \"off\": 1}}",
+            a.r, a.g, a.b, a.pen_width
+        );
+        ros2_exec(&["service", "call", &svc, "turtlesim/srv/SetPen", &params], 5)
+            .await
+            .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
+
+        let svc = format!("/{}/teleport_absolute", a.name);
+        let params = format!("{{x: {:.4}, y: {:.4}, theta: {:.4}}}", x0, y0, initial_theta);
+        ros2_exec(&["service", "call", &svc, "turtlesim/srv/TeleportAbsolute", &params], 5)
+            .await
+            .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
+
+        // Pen down with colour
+        let svc = format!("/{}/set_pen", a.name);
+        let params = format!(
+            "{{r: {}, g: {}, b: {}, width: {}, \"off\": 0}}",
+            a.r, a.g, a.b, a.pen_width
+        );
+        ros2_exec(&["service", "call", &svc, "turtlesim/srv/SetPen", &params], 5)
+            .await
+            .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
+
+        // Draw 4 sides, closing back to the start corner
+        let mut path: Vec<(f64, f64)> = corners.to_vec();
+        path.push(corners[0]);
+
+        let mut cur_x     = x0;
+        let mut cur_y     = y0;
+        let mut cur_theta = initial_theta;
+
+        for &(tx, ty) in &path[1..] {
+            cur_theta = draw_segment_internal(&a.name, cur_x, cur_y, cur_theta, tx, ty, a.speed)
+                .await
+                .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
+            cur_x = tx;
+            cur_y = ty;
+        }
+
+        Ok(json!({
+            "drawn":   true,
+            "x":       a.x,
+            "y":       a.y,
+            "width":   a.width,
+            "height":  a.height,
+            "corners": corners.iter().enumerate()
+                .map(|(i, (cx, cy))| json!({"i": i, "x": cx, "y": cy}))
+                .collect::<Vec<_>>(),
+        }))
+    }
+}
+
+// ── turtle_calculate_rectangle_bounds ────────────────────────────────────
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct RectBoundsArgs {
+    /// X coordinate of the bottom-left corner.
+    pub x: f64,
+    /// Y coordinate of the bottom-left corner.
+    pub y: f64,
+    /// Rectangle width along the +x axis.
+    pub width: f64,
+    /// Rectangle height along the +y axis.
+    pub height: f64,
+}
+
+struct TurtleCalculateRectangleBounds;
+
+#[async_trait]
+impl Tool for TurtleCalculateRectangleBounds {
+    fn name(&self) -> &str { "turtle_calculate_rectangle_bounds" }
+    fn description(&self) -> &str {
+        "Pure computation — no ROS calls. Given a rectangle's bottom-left corner (x, y), \
+         width, and height, return all four corner coordinates, the center point, \
+         and the x/y ranges. Use this to plan drawing coordinates before calling \
+         `turtle_draw_rectangle`."
+    }
+    fn schema(&self) -> RootSchema { schema_for!(RectBoundsArgs) }
+
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: RectBoundsArgs = serde_json::from_value(args)?;
+        Ok(json!({
+            "bottom_left":  { "x": a.x,              "y": a.y              },
+            "bottom_right": { "x": a.x + a.width,    "y": a.y              },
+            "top_right":    { "x": a.x + a.width,    "y": a.y + a.height   },
+            "top_left":     { "x": a.x,              "y": a.y + a.height   },
+            "center":       { "x": a.x + a.width / 2.0, "y": a.y + a.height / 2.0 },
+            "x_range":      { "min": a.x, "max": a.x + a.width  },
+            "y_range":      { "min": a.y, "max": a.y + a.height },
+            "width":        a.width,
+            "height":       a.height,
+        }))
+    }
+}
+
+// ── turtle_check_rectangles_overlap ──────────────────────────────────────
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct RectOverlapArgs {
+    /// First rectangle as [x, y, width, height] (bottom-left corner + dimensions).
+    pub rect1: [f64; 4],
+    /// Second rectangle as [x, y, width, height] (bottom-left corner + dimensions).
+    pub rect2: [f64; 4],
+}
+
+struct TurtleCheckRectanglesOverlap;
+
+#[async_trait]
+impl Tool for TurtleCheckRectanglesOverlap {
+    fn name(&self) -> &str { "turtle_check_rectangles_overlap" }
+    fn description(&self) -> &str {
+        "Pure computation — no ROS calls. Check whether two axis-aligned rectangles overlap. \
+         Each rectangle is given as [x, y, width, height] where (x, y) is the bottom-left corner. \
+         Returns `overlap: true/false` and the overlapping sub-region bounds when they do overlap."
+    }
+    fn schema(&self) -> RootSchema { schema_for!(RectOverlapArgs) }
+
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: RectOverlapArgs = serde_json::from_value(args)?;
+        let [x1, y1, w1, h1] = a.rect1;
+        let [x2, y2, w2, h2] = a.rect2;
+
+        // AABB overlap test
+        let overlap = x1 < x2 + w2 && x1 + w1 > x2
+                   && y1 < y2 + h2 && y1 + h1 > y2;
+
+        if overlap {
+            let ox  = x1.max(x2);
+            let oy  = y1.max(y2);
+            let ox2 = (x1 + w1).min(x2 + w2);
+            let oy2 = (y1 + h1).min(y2 + h2);
+            Ok(json!({
+                "overlap": true,
+                "overlap_region": {
+                    "x":      ox,
+                    "y":      oy,
+                    "width":  ox2 - ox,
+                    "height": oy2 - oy,
+                },
+            }))
+        } else {
+            Ok(json!({ "overlap": false }))
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Build the full turtle registry
 // ---------------------------------------------------------------------------
@@ -1023,6 +1455,11 @@ fn turtle_registry() -> ToolRegistry {
         .register(TurtleDrawCircle)
         .register(TurtleDrawStar)
         .register(TurtleDrawPolyline)
+        .register(TurtleHasMovedTo)
+        .register(TurtleDrawArc)
+        .register(TurtleDrawRectangle)
+        .register(TurtleCalculateRectangleBounds)
+        .register(TurtleCheckRectanglesOverlap)
 }
 
 // ---------------------------------------------------------------------------
@@ -1179,12 +1616,21 @@ You are rosa, a robot operator controlling a TurtleSim in ROS 2.
 ## Available Tools
 
 ### High-level drawing (use these first — they handle pen, teleport, and sequencing):
-| Tool                    | Purpose                                                              |
-|-------------------------|----------------------------------------------------------------------|
-| `turtle_draw_star`      | **5-point star**: give center (cx,cy) + outer_radius + colour. Done.|
-| `turtle_draw_polyline`  | Multi-point path: give list of [x,y] points + colour. Done.        |
-| `turtle_draw_circle`    | Circle at current position, given radius + colour.                  |
-| `turtle_draw_line_to`   | Single segment from current pose to (target_x, target_y).          |
+| Tool                               | Purpose                                                              |
+|------------------------------------|----------------------------------------------------------------------|
+| `turtle_draw_star`                 | **5-point star**: give center (cx,cy) + outer_radius + colour.      |
+| `turtle_draw_polyline`             | Multi-point path: give list of [x,y] points + colour.               |
+| `turtle_draw_circle`               | Full circle at current position, given radius.                       |
+| `turtle_draw_arc`                  | Circular arc: center, radius, start_angle_deg, sweep_deg.           |
+| `turtle_draw_rectangle`            | Axis-aligned rectangle: bottom-left (x,y), width, height.           |
+| `turtle_draw_line_to`              | Single segment from current pose to (target_x, target_y).           |
+
+### Planning helpers (pure computation, no ROS calls):
+| Tool                                    | Purpose                                               |
+|-----------------------------------------|-------------------------------------------------------|
+| `turtle_calculate_rectangle_bounds`     | All 4 corners, center, x/y ranges of a rectangle.    |
+| `turtle_check_rectangles_overlap`       | AABB overlap test for two [x,y,w,h] rectangles.      |
+| `turtle_has_moved_to`                   | Verify turtle reached expected (x,y) within tolerance.|
 
 ### Motion / positioning:
 | Tool                       | Purpose                                                   |

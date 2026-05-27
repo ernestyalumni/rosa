@@ -559,6 +559,42 @@ impl Tool for Variance {
     }
 }
 
+pub struct Mode;
+
+#[async_trait]
+impl Tool for Mode {
+    fn name(&self) -> &str { "mode" }
+    fn description(&self) -> &str {
+        "Return the mode(s) — most frequently occurring value(s) — of a list of numbers. \
+         If multiple values tie for highest frequency all are returned. \
+         Values are compared by their exact f64 bit pattern (finite numbers only)."
+    }
+    fn schema(&self) -> RootSchema { schema_for!(NumberList) }
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: NumberList = serde_json::from_value(args)?;
+        if a.numbers.is_empty() {
+            return Err(RosaError::ToolExecution {
+                name: "mode".into(),
+                message: "cannot compute mode of an empty list".into(),
+            });
+        }
+        // Count occurrences using the bit-pattern of each finite f64 as key.
+        let mut counts: std::collections::HashMap<u64, (f64, usize)> = std::collections::HashMap::new();
+        for &v in &a.numbers {
+            let key = v.to_bits();
+            let entry = counts.entry(key).or_insert((v, 0));
+            entry.1 += 1;
+        }
+        let max_count = counts.values().map(|(_, c)| *c).max().unwrap_or(0);
+        let mut modes: Vec<f64> = counts.values()
+            .filter(|(_, c)| *c == max_count)
+            .map(|(v, _)| *v)
+            .collect();
+        modes.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        Ok(json!({ "modes": modes, "frequency": max_count }))
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Count helpers: count_items, count_words, count_lines
 // ---------------------------------------------------------------------------
