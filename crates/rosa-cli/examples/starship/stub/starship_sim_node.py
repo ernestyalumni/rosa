@@ -47,11 +47,11 @@ from std_msgs.msg import Bool, Float32, Float64, String
 from std_srvs.srv import Empty
 
 # ── Physics constants ─────────────────────────────────────────────────────
-# Calibrated so hover throttle ≈ 0.45–0.55 depending on propellant load,
-# matching the FSW system-prompt spec (0.0 = empty, 1.0 = full tank).
-#   Full-fuel (830 t total) hover throttle: 830k×9.81/14.7M ≈ 0.554
-#   Half-fuel (480 t total) hover throttle: 480k×9.81/14.7M ≈ 0.321
-G            = 9.81          # m/s²
+# Mars proximity ops scenario.
+# Hover throttle at Mars g=3.72 m/s²:
+#   Dry (130 t): 130000×3.72/14.7M ≈ 0.033
+#   Full fuel (830 t): 830000×3.72/14.7M ≈ 0.210
+G            = 3.72          # m/s²  — Mars surface gravity
 DRY_MASS     = 130_000.0     # kg  (upper-stage dry mass)
 MAX_THRUST   = 14_700_000.0  # N   (6× Raptor Vacuum, simplified)
 MAX_THROTTLE = 0.85
@@ -67,14 +67,16 @@ class StarshipSimNode(Node):
 
         # ── State ─────────────────────────────────────────────────────────
         self._lock       = threading.Lock()
-        self._altitude   = 0.0     # m AGL
+        self._altitude   = 1_000.0  # m AGL — Mars proximity ops spawn altitude
         self._vel_y      = 0.0     # m/s vertical
         self._pitch      = 0.0     # rad (world frame tilt)
         self._yaw        = 0.0     # rad
         self._dpitch     = 0.0     # rad/s
         self._dyaw       = 0.0     # rad/s
         self._fuel       = FUEL_CAP
-        self._throttle   = 0.0
+        # Pre-engage hover throttle so vehicle is station-keeping at 1000 m on startup.
+        # T_hover (full fuel, Mars) = (130000+700000)*3.72/14700000 ≈ 0.210
+        self._throttle   = 0.210
         self._gimbal_pitch = 0.0
         self._gimbal_yaw   = 0.0
         self._safe_mode  = False
@@ -104,7 +106,10 @@ class StarshipSimNode(Node):
         self._tick_count = 0
         self.create_timer(dt, self._tick)
 
-        self.get_logger().info("Starship sim node started — altitude=0 m, fuel=100%")
+        self.get_logger().info(
+            "Starship sim node started — altitude=1000 m AGL (Mars), "
+            "fuel=100%, throttle=0.21 (hover)"
+        )
 
     # ── Callbacks ─────────────────────────────────────────────────────────
 
@@ -144,18 +149,21 @@ class StarshipSimNode(Node):
 
     def _srv_reset(self, _req, response):
         with self._lock:
-            self._altitude   = 0.0
+            self._altitude   = 1_000.0  # Mars proximity ops altitude
             self._vel_y      = 0.0
             self._pitch      = 0.0
             self._yaw        = 0.0
             self._dpitch     = 0.0
             self._dyaw       = 0.0
             self._fuel       = FUEL_CAP
-            self._throttle   = 0.0
+            # Restore hover throttle on reset so vehicle stations-keep at 1000 m
+            self._throttle   = 0.210
             self._gimbal_pitch = 0.0
             self._gimbal_yaw   = 0.0
             self._safe_mode  = False
-        self.get_logger().info("Starship reset to launch pad")
+        self.get_logger().info(
+            "Starship reset — altitude=1000 m AGL, fuel=100%, throttle=0.21 (hover)"
+        )
         return response
 
     # ── Physics step + publish ─────────────────────────────────────────────

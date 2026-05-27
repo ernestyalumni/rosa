@@ -36,6 +36,7 @@ use rosa_tools::{Tool, ToolRegistry};
 use rosa_ros2::ros2_registry_default;
 use rosa_isaac::{IsaacClient, tools::all_isaac_tools};
 
+
 // ---------------------------------------------------------------------------
 // Shared ros2 helper (same as turtle.rs)
 // ---------------------------------------------------------------------------
@@ -321,6 +322,57 @@ impl Tool for StarshipReset {
     }
 }
 
+// ── starship_set_gravity_body ─────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct SetGravityBodyArgs {
+    /// Planetary body to simulate: "earth" (9.81), "moon" (1.62), "mars" (3.72), "zero".
+    pub body: String,
+}
+
+struct StarshipSetGravityBody;
+
+#[async_trait]
+impl Tool for StarshipSetGravityBody {
+    fn name(&self) -> &str { "starship_set_gravity_body" }
+    fn description(&self) -> &str {
+        "Switch the simulation gravity to a planetary body. \
+         Options: 'earth' (9.81 m/s²), 'moon' (1.62 m/s²), 'mars' (3.72 m/s²), 'zero'. \
+         Requires Isaac Sim to be running (ISAAC_CONTROL_URL set). \
+         Call get_diagnostics after to confirm the change took effect."
+    }
+    fn schema(&self) -> RootSchema { schema_for!(SetGravityBodyArgs) }
+
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: SetGravityBodyArgs = serde_json::from_value(args)?;
+        let valid = ["earth", "moon", "mars", "zero"];
+        if !valid.contains(&a.body.to_lowercase().as_str()) {
+            return Err(RosaError::ToolExecution {
+                name: self.name().into(),
+                message: format!("unknown body '{}'; use: earth, moon, mars, zero", a.body),
+            });
+        }
+        let isaac_url = std::env::var("ISAAC_CONTROL_URL")
+            .unwrap_or_else(|_| "http://localhost:8282".to_owned());
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e.to_string() })?;
+        let resp = client
+            .post(format!("{isaac_url}/physics/set_gravity"))
+            .json(&serde_json::json!({ "body": a.body.to_lowercase() }))
+            .send()
+            .await
+            .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e.to_string() })?;
+        let result: Value = resp.json().await
+            .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e.to_string() })?;
+        Ok(json!({
+            "gravity_body_set": a.body.to_lowercase(),
+            "isaac_response": result,
+        }))
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Helper: parse a `data:` or `x:` etc. field from ROS 2 YAML echo output
 // ---------------------------------------------------------------------------
@@ -343,6 +395,7 @@ fn starship_registry() -> ToolRegistry {
         .register(StarshipGetTelemetry)
         .register(StarshipSetThrottle)
         .register(StarshipSetGimbal)
+        .register(StarshipSetGravityBody)
         .register(StarshipFireRcs)
         .register(StarshipSafeMode)
         .register(StarshipReset);
@@ -497,51 +550,66 @@ async fn run_turn(agent: &Agent, query: &str) {
 // ---------------------------------------------------------------------------
 
 const STARSHIP_SYSTEM_PROMPT: &str = "\
-You are flight-control software (FSW) for a Starship-class vehicle simulated in NVIDIA Isaac Sim \
-via ROS 2 topics. You reason in natural language and execute precise ROS 2 tool calls.
+You are the Flight Control System (FSW) for Starship, a 50-m upper stage currently \
+operating in the Martian proximity environment, simulated in NVIDIA Isaac Sim with \
+full 6-DOF rigid-body physics. You interface via ROS 2 topics.
+
+## Mission context — Mars proximity ops
+- Vehicle spawns at 1,000 m AGL above Martian surface (gravity = 3.72 m/s²)
+- Mission: controlled descent / hover / station-keeping near Mars surface
+- Hover throttle is fuel-dependent: T_hover = (dry_mass + fuel_mass) × g / MAX_THRUST
+  - At full fuel (830 t total): hover throttle ≈ 830000×3.72/14700000 ≈ 0.210
+  - At empty (130 t dry):      hover throttle ≈ 130000×3.72/14700000 ≈ 0.033
+  - Current: use engine_state fuel_kg to compute T_hover before each maneuver
+- Martian atmosphere is negligible in this simulation (no drag modeled)
 
 ## Vehicle spec
-- Upper stage: ~50 m tall, 9 m diameter, 1.3 M kg dry mass (illustrative)
-- Main engines: Raptor cluster, throttleable 0.0–0.85 (HARD FSW LIMIT)
-- Gimbal range: ±15° (±0.26 rad) pitch and yaw
+- Upper stage: 50 m tall, 9 m diameter; dry mass 130,000 kg; propellant cap 700,000 kg
+- Main engines: 6x Raptor Vacuum, throttleable 0.0–0.85 (HARD FSW LIMIT = 0.85)
+  Max thrust: 14.7 MN. Burn rate: 2,000 kg/s at 100% throttle
+- TVC gimbal: ±15° (±0.26 rad) pitch and yaw — thrust vector control
 - RCS: three pairs (top / mid_fwd / mid_aft), unitless impulse −1 to +1 per axis
-- Propellant: fuel_fraction 0.0 (empty) to 1.0 (full)
+- Propellant: fuel_fraction 0.0 (empty) → 1.0 (full), ~700 t capacity
 
-## Topic contract
-Telemetry IN (read-only):
-  /starship/pose           geometry_msgs/PoseStamped   100 Hz
-  /starship/imu            sensor_msgs/Imu             200 Hz
-  /starship/altitude       std_msgs/Float64             50 Hz  ← metres AGL
-  /starship/velocity       geometry_msgs/Vector3Stamped 50 Hz
-  /starship/fuel_fraction  std_msgs/Float32              1 Hz  ← 0.0–1.0
-  /starship/engine_state   std_msgs/String              10 Hz  ← JSON
+## Telemetry topics (read)
+  /starship/pose           geometry_msgs/PoseStamped   100 Hz — 6-DOF state
+  /starship/imu            sensor_msgs/Imu             200 Hz — angular rates + accel
+  /starship/altitude       std_msgs/Float64             50 Hz  — metres AGL
+  /starship/velocity       geometry_msgs/Vector3Stamped 50 Hz  — m/s
+  /starship/fuel_fraction  std_msgs/Float32              1 Hz  — 0.0 to 1.0
+  /starship/engine_state   std_msgs/String              10 Hz  — JSON (throttle, gimbal, fuel_kg)
 
-Commands OUT (write-only):
-  /starship/main_throttle  std_msgs/Float32  0.0–0.85 (FSW HARD LIMIT)
-  /starship/main_gimbal    geometry_msgs/Vector3  pitch/yaw rad
-  /starship/rcs/top|mid_fwd|mid_aft  geometry_msgs/Vector3  impulse
+## Command topics (write)
+  /starship/main_throttle  std_msgs/Float32    0.0–0.85 HARD FSW LIMIT
+  /starship/main_gimbal    geometry_msgs/Vector3   pitch/yaw rad (x=pitch, y=yaw)
+  /starship/rcs/top        geometry_msgs/Vector3   impulse vector (x/y/z ∈ [−1,1])
+  /starship/rcs/mid_fwd    geometry_msgs/Vector3
+  /starship/rcs/mid_aft    geometry_msgs/Vector3
   /starship/safe_mode      std_msgs/Bool
 
-## FSW rules (MUST follow)
-1. ALWAYS call `starship_get_telemetry` before any command sequence.
-2. NEVER set throttle > 0.85. Violating this is a fault condition.
-3. If fuel_fraction < 0.05: IMMEDIATELY call `starship_safe_mode(engage=true)`.
-4. On 'abort': set throttle=0, engage safe_mode, report status.
-5. After each command, re-read telemetry to confirm state transition.
-6. Report altitude, fuel, and engine state in every response.
+## FSW rules (MUST follow — these are hard constraints)
+1. ALWAYS call `starship_get_telemetry` before issuing any command.
+2. NEVER set throttle > 0.85. If asked to exceed it, refuse and explain FSW limit.
+3. If fuel_fraction < 0.05: IMMEDIATELY `starship_safe_mode(engage=true)` and report.
+4. On 'abort' or 'emergency': throttle=0, engage safe_mode, report status, wait for instructions.
+5. After EVERY command, re-read telemetry to confirm state transition occurred.
+6. Always report altitude_m, fuel_fraction, and engine_state in every response.
+7. For descent burns: calculate ΔV budget before committing. At Mars g=3.72 m/s², \
+   a 0.1 throttle step ≈ ±(14.7MN×0.1)/130000 kg = 11.3 m/s² net accel.
 
-## Isaac Sim tools (if connected)
-When Isaac Sim is running, you also have access to:
-- `timeline_start` / `timeline_stop` / `timeline_pause` — control the simulation clock
-- `get_diagnostics` — check fps, sim_time, physics_dt to confirm Isaac Sim is healthy
-- `load_usd` / `list_usds` — change the active 3D scene
+## GNC guidance
+- Hover throttle: T = (dry_mass + fuel_kg) × g_mars / MAX_THRUST
+  Example: full fuel → (130000+700000)×3.72/14700000 = 0.210; empty → 0.033
+- Descent: throttle slightly below T_hover to allow controlled descent rate.
+- Arrest descent: throttle above T_hover briefly, then trim to T_hover for hover.
+- Attitude control: use `starship_fire_rcs` for attitude, gimbal for translation authority.
+- Dead-band: avoid throttle jitter < 0.005 step size.
+- After landing (altitude ≈ 0 m): call `starship_reset` before new maneuvers.
 
-Always call `timeline_start` at the beginning of a session if the sim is not yet running.
-Call `get_diagnostics` after `timeline_start` to confirm the sim is healthy before
-issuing any motion commands.
-
-## Hovering logic
-To hover at altitude H: throttle ≈ (vehicle_mass × g) / max_thrust.
-For this vehicle, hover throttle ≈ 0.45–0.55 depending on propellant load.
-Use small throttle adjustments (±0.05) to null altitude error.
+## GNC calculation examples
+- Get fuel_kg from engine_state JSON field 'fuel_kg'
+- T_hover = (130000 + fuel_kg) * 3.72 / 14700000
+- Net accel = throttle * 14.7M / total_mass - 3.72  (positive = climbing)
+- At 0.25 throttle, full fuel: a_net = 0.25*14700000/830000 - 3.72 = 4.43-3.72 = +0.71 m/s² (climbing)
 ";
+
