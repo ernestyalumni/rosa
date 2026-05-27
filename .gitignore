@@ -14,9 +14,5 @@ Cargo.lock
 # Secrets — never commit
 .env
 
-# Local test screenshots / recordings (reference via tests/LocalImages/ on disk)
-tests/LocalImages/
-tests/LocalVideos/
-
 # Large transcript / personal dump files
 Documents/Transcript*
