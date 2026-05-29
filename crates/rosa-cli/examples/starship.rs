@@ -322,6 +322,58 @@ impl Tool for StarshipReset {
     }
 }
 
+// ── starship_refuel ───────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct RefuelArgs {
+    /// Desired fuel fraction after refueling: 0.0 (empty) to 1.0 (full tanks).
+    /// Vehicle MUST be on the ground (altitude ≤ 5 m) or the command is rejected.
+    pub fuel_fraction: f32,
+}
+
+struct StarshipRefuel;
+
+#[async_trait]
+impl Tool for StarshipRefuel {
+    fn name(&self) -> &str { "starship_refuel" }
+    fn description(&self) -> &str {
+        "Refuel the vehicle to any desired fuel fraction (0.0–1.0). \
+         ONLY valid when altitude ≤ 5 m (vehicle on the ground). \
+         Rejected if airborne. Full tanks = 700,000 kg propellant."
+    }
+    fn schema(&self) -> RootSchema { schema_for!(RefuelArgs) }
+
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let a: RefuelArgs = serde_json::from_value(args)?;
+
+        // Enforce ground constraint before publishing
+        let alt_raw = echo_once("/starship/altitude", "std_msgs/msg/Float64")
+            .await.unwrap_or_default();
+        let alt_m = parse_float_field(&alt_raw, "data").unwrap_or(f64::MAX);
+        if alt_m > 5.0 {
+            return Err(RosaError::ToolExecution {
+                name: self.name().into(),
+                message: format!(
+                    "REFUEL REJECTED: vehicle airborne at {:.1} m. \
+                     Land first (altitude ≤ 5 m).", alt_m
+                ),
+            });
+        }
+
+        let fraction = a.fuel_fraction.clamp(0.0, 1.0);
+        let yaml = format!("{{data: {fraction:.3}}}");
+        pub_once("/starship/refuel", "std_msgs/msg/Float32", &yaml)
+            .await
+            .map_err(|e| RosaError::ToolExecution { name: self.name().into(), message: e })?;
+
+        Ok(json!({
+            "refueled": true,
+            "fuel_fraction": fraction,
+            "fuel_kg_approx": fraction * 700_000.0,
+        }))
+    }
+}
+
 // ── starship_set_gravity_body ─────────────────────────────────────────────
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -398,7 +450,8 @@ fn starship_registry() -> ToolRegistry {
         .register(StarshipSetGravityBody)
         .register(StarshipFireRcs)
         .register(StarshipSafeMode)
-        .register(StarshipReset);
+        .register(StarshipReset)
+        .register(StarshipRefuel);
 
     // Add Isaac Sim timeline / diagnostics / USD tools when an Isaac Sim
     // instance is reachable.  Set ISAAC_CONTROL_URL (default localhost:8282)
@@ -605,6 +658,8 @@ full 6-DOF rigid-body physics. You interface via ROS 2 topics.
 - Attitude control: use `starship_fire_rcs` for attitude, gimbal for translation authority.
 - Dead-band: avoid throttle jitter < 0.005 step size.
 - After landing (altitude ≈ 0 m): call `starship_reset` before new maneuvers.
+- Refueling: only possible on the ground (altitude ≤ 5 m). Use `starship_refuel` with \
+  fuel_fraction 0.0–1.0. Always read telemetry after to confirm new fuel_kg.
 
 ## GNC calculation examples
 - Get fuel_kg from engine_state JSON field 'fuel_kg'
